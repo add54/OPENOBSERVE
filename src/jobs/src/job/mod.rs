@@ -1733,6 +1733,7 @@ pub async fn init_deferred() -> Result<(), anyhow::Error> {
         )
         .await;
         tokio::task::spawn(db::license::watch());
+        tokio::task::spawn(db::license::watch_usage());
     }
 
     if !LOCAL_NODE.is_ingester() && !LOCAL_NODE.is_querier() && !LOCAL_NODE.is_scheduler() {
