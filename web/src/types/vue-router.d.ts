@@ -22,5 +22,7 @@ declare module "vue-router" {
     accessResource?: string;
     /** Query keys naming the item this route shows; access denials are remembered per item. */
     accessScopeQuery?: string[];
+    /** License feature key the page needs; a `locked` key renders the page with every control disabled. */
+    licenseFeature?: string;
   }
 }
