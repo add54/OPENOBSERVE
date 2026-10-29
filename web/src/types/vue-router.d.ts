@@ -24,5 +24,7 @@ declare module "vue-router" {
     accessScopeQuery?: string[];
     /** License feature key the page needs; a `locked` key renders the page with every control disabled. */
     licenseFeature?: string;
+    /** The license key comes from `query.stream_type` instead, via `streamTypeFeature`. */
+    licenseFeatureFromStreamType?: boolean;
   }
 }

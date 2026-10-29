@@ -2764,6 +2764,12 @@ describe("useRoutes (router.ts)", () => {
       ["infraHosts", "host_monitoring"],
       ["alertDestinations", "alerts"],
       ["alertTemplates", "alerts"],
+      ["traces", "traces"],
+      ["traceDetails", "traces"],
+      ["sessionDetails", "traces"],
+      ["metrics", "metrics"],
+      ["metricsEditor", "metrics"],
+      ["promqlBuilder", "metrics"],
     ])("tags %s with meta.licenseFeature %s", (name, feature) => {
       expect(findRoute(useRoutes().homeChildRoutes, name).meta.licenseFeature).toBe(feature);
     });
@@ -2772,10 +2778,23 @@ describe("useRoutes (router.ts)", () => {
       expect(shell("infra/databases").meta.licenseFeature).toBe("db_monitoring");
     });
 
-    it.each(["pipeline", "functionList", "importFunction", "enrichmentTables", "logs", "traces"])(
-      "leaves %s untagged",
+    it.each([
+      "pipeline",
+      "functionList",
+      "importFunction",
+      "enrichmentTables",
+      "logs",
+      "logstreams",
+    ])("leaves %s untagged", (name) => {
+      expect(findRoute(useRoutes().homeChildRoutes, name).meta?.licenseFeature).toBeUndefined();
+    });
+
+    it.each(["logs", "searchJobInspector", "searchHistory", "searchScheduler", "streamExplorer"])(
+      "locks %s by its stream_type query instead of a static key",
       (name) => {
-        expect(findRoute(useRoutes().homeChildRoutes, name).meta?.licenseFeature).toBeUndefined();
+        const { meta } = findRoute(useRoutes().homeChildRoutes, name);
+        expect(meta.licenseFeatureFromStreamType).toBe(true);
+        expect(meta.licenseFeature).toBeUndefined();
       },
     );
 
