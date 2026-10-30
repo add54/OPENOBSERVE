@@ -264,6 +264,9 @@ export default defineComponent({
       );
       const queryManagementLicense = featureState(z?.features, "query_management");
       const byobLicense = featureState(z?.features, "byob");
+      const oncallLicense = menuState(z?.features, "oncall", z?.oncall_enabled !== false);
+      const aiObsLicense = menuState(z?.features, "ai_observability", !!z?.online_evals_enabled);
+      const alertsLocked = featureState(z?.features, "alerts") === "locked";
 
       const items: (SectionHubItem & { group: string })[] = [
         {
@@ -377,9 +380,10 @@ export default defineComponent({
           icon: "call",
           to: { name: "telephonySettings", query: { org_identifier: org } },
           // The route guard's rule: only an explicit `oncall_enabled: false` closes it.
-          visible: z.oncall_enabled !== false && oncallAccess.visible,
+          visible: oncallLicense !== "hidden" && oncallAccess.visible,
           locked: !oncallAccess.allowed,
           lockedMessage: oncallAccess.message,
+          licenseLocked: oncallLicense === "locked",
           dataTest: "telephony-settings-tab",
           group: "Destinations",
         },
@@ -422,6 +426,7 @@ export default defineComponent({
           visible: !!z.model_pricing_enabled && modelPricingAccess.visible,
           locked: !modelPricingAccess.allowed,
           lockedMessage: modelPricingAccess.message,
+          licenseLocked: featureState(z?.features, "ai_observability") === "locked",
           dataTest: "model-pricing-tab",
           group: "Data & AI",
         },
@@ -434,7 +439,7 @@ export default defineComponent({
           visible: correlationLicense !== "hidden" && correlationSettingsAccess.visible,
           locked: !correlationSettingsAccess.allowed,
           lockedMessage: correlationSettingsAccess.message,
-          licenseLocked: correlationLicense === "locked",
+          licenseLocked: correlationLicense === "locked" && alertsLocked,
           dataTest: "correlation-settings-tab",
           group: "Data & AI",
         },
@@ -444,9 +449,10 @@ export default defineComponent({
           description: t("settings.llmProvidersDesc"),
           icon: "smart-toy",
           to: { name: "llmProviders", query: { org_identifier: org } },
-          visible: !!z.online_evals_enabled && llmProvidersAccess.visible,
+          visible: aiObsLicense !== "hidden" && llmProvidersAccess.visible,
           locked: !llmProvidersAccess.allowed,
           lockedMessage: llmProvidersAccess.message,
+          licenseLocked: aiObsLicense === "locked",
           dataTest: "llm-providers-tab",
           group: "Data & AI",
         },
@@ -456,9 +462,10 @@ export default defineComponent({
           description: t("settings.index.genAiAgentMappingDesc"),
           icon: "smart-toy",
           to: { name: "genAiAgentMapping", query: { org_identifier: org } },
-          visible: !!z.online_evals_enabled && genAiAgentMappingAccess.visible,
+          visible: aiObsLicense !== "hidden" && genAiAgentMappingAccess.visible,
           locked: !genAiAgentMappingAccess.allowed,
           lockedMessage: genAiAgentMappingAccess.message,
+          licenseLocked: aiObsLicense === "locked",
           dataTest: "gen-ai-agent-mapping-tab",
           group: "Data & AI",
         },
