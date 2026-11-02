@@ -803,6 +803,10 @@ export default defineComponent({
         label: raw("Tiếng Việt"),
         code: "vi",
       },
+      {
+        label: raw("ไทย"),
+        code: "th",
+      },
     ];
 
     onBeforeMount(() => {

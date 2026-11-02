@@ -427,7 +427,7 @@ const useEnterpriseRoutes = () => {
         path: "fleet/configurations/:id",
         name: "fleetConfigEditor",
         component: () => import("@/views/FleetConfigEditor.vue"),
-        meta: { titleKey: "fleet.editor.pageTitle" },
+        meta: { titleKey: "fleet.editor.pageTitle", allowOnEmptyData: true },
         beforeEnter(to: any, from: any, next: any) {
           routeGuard(to, from, next);
         },
@@ -436,7 +436,7 @@ const useEnterpriseRoutes = () => {
         path: "fleet",
         name: "fleet",
         component: () => import("@/views/FleetManager.vue"),
-        meta: { titleKey: "menu.fleet" },
+        meta: { titleKey: "menu.fleet", allowOnEmptyData: true },
         beforeEnter(to: any, from: any, next: any) {
           routeGuard(to, from, next);
         },

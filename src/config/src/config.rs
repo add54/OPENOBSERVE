@@ -129,13 +129,14 @@ pub type RwBTreeMap<K, V> = tokio::sync::RwLock<BTreeMap<K, V>>;
 // 129: add source, query_key, streams, run_count, updated_at and status to query_history.
 // 130: add suppress_repeats to alerts.
 // 131: org domain mapping migrations
-// 132: add first_event_at to ai_chat_turns.
-// 133: org_ai_toolsets health; create ai_grants, ai_actions, ai_access_requests, ai_turn_marks.
-// 134: chat pins, seeds, turn versions, decisions, hide_attachments, ai_chat_feedback/imports.
-// 135: create paid_overage_attribution.
-// 136: create ai_approvals.
-// 137: add agent to ai_chat_turns.
-pub const DB_SCHEMA_VERSION: u64 = 137;
+// 132: create oncall_chat_messages; add oncall_teams slack columns.
+// 133: add first_event_at to ai_chat_turns.
+// 134: org_ai_toolsets health; create ai_grants, ai_actions, ai_access_requests, ai_turn_marks.
+// 135: chat pins, seeds, turn versions, decisions, hide_attachments, ai_chat_feedback/imports.
+// 136: create paid_overage_attribution.
+// 137: create ai_approvals.
+// 138: add agent to ai_chat_turns.
+pub const DB_SCHEMA_VERSION: u64 = 138;
 pub const DB_SCHEMA_KEY: &str = "/db_schema_version/";
 
 // global version variables

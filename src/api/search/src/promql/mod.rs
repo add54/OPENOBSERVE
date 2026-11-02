@@ -60,6 +60,7 @@ use crate::{
     request_body(content = String, description = "prometheus WriteRequest", content_type = "application/x-protobuf"),
     responses(
         (status = 200, description = "Success", content_type = "application/json", body = Object, example = json!({"code": 200})),
+        (status = 400, description = "Not a protobuf body or the payload cannot be ingested", content_type = "application/json", body = ()),
         (status = 500, description = "Failure", content_type = "application/json", body = ()),
     ),
     extensions(
@@ -132,6 +133,9 @@ pub async fn remote_write(
                ]
             }
         })),
+        (status = 400, description = "Invalid query or time", content_type = "application/json", body = ()),
+        (status = 403, description = "No permission on the metric stream", content_type = "application/json", body = ()),
+        (status = 429, description = "Search disabled after exceeding the licensed ingestion limit, or rate limited", content_type = "application/json", body = ()),
         (status = 500, description = "Failure", content_type = "application/json", body = ()),
     ),
     extensions(
@@ -304,6 +308,9 @@ async fn query(
                ]
             }
         })),
+        (status = 400, description = "Invalid query, time range, step or search type", content_type = "application/json", body = ()),
+        (status = 403, description = "No permission on the metric stream", content_type = "application/json", body = ()),
+        (status = 429, description = "Search disabled after exceeding the licensed ingestion limit, or rate limited", content_type = "application/json", body = ()),
         (status = 500, description = "Failure", content_type = "application/json", body = ()),
     ),
     extensions(
@@ -398,6 +405,9 @@ pub async fn query_range_post(
                 }
             ]
         })),
+        (status = 400, description = "Invalid query, time range, step or search type", content_type = "application/json", body = ()),
+        (status = 403, description = "No permission on the metric stream", content_type = "application/json", body = ()),
+        (status = 429, description = "Search disabled after exceeding the licensed ingestion limit, or rate limited", content_type = "application/json", body = ()),
         (status = 500, description = "Failure", content_type = "application/json", body = ()),
     ),
     extensions(
@@ -541,6 +551,16 @@ async fn query_range(
             }
         },
     };
+    if let Err(e) = validate_range_window(start, end) {
+        return (
+            StatusCode::BAD_REQUEST,
+            axum::Json(config::meta::promql::ApiFuncResponse::<()>::err_bad_data(
+                e,
+                Some(trace_id),
+            )),
+        )
+            .into_response();
+    }
     if step == 0 {
         step = promql::round_step((end - start) / promql::MAX_DATA_POINTS);
     }
@@ -616,6 +636,7 @@ async fn query_range(
               ]
             }
         })),
+        (status = 403, description = "No permission to read metrics", content_type = "application/json", body = ()),
         (status = 500, description = "Failure", content_type = "application/json", body = ()),
     ),
     extensions(
@@ -740,6 +761,9 @@ pub async fn metadata(
                }
             ]
         })),
+        (status = 400, description = "Invalid match[] or time range", content_type = "application/json", body = ()),
+        (status = 403, description = "No permission on the metric stream", content_type = "application/json", body = ()),
+        (status = 429, description = "Search disabled after exceeding the licensed ingestion limit, or rate limited", content_type = "application/json", body = ()),
         (status = 500, description = "Failure", content_type = "application/json", body = ()),
     ),
     extensions(
@@ -873,6 +897,8 @@ async fn series(
                 "version"
             ]
         })),
+        (status = 400, description = "Invalid match[] or time range", content_type = "application/json", body = ()),
+        (status = 403, description = "No permission to read metrics", content_type = "application/json", body = ()),
         (status = 500, description = "Failure", content_type = "application/json", body = ()),
     ),
     extensions(
@@ -1014,6 +1040,7 @@ async fn labels(
             ]
         })),
         (status = 400, description = "Invalid parameters or match[] does not identify a metric", content_type = "application/json", body = ()),
+        (status = 403, description = "No permission to read metrics", content_type = "application/json", body = ()),
         (status = 500, description = "Failure", content_type = "application/json", body = ()),
     ),
     extensions(
@@ -1201,6 +1228,19 @@ fn validate_metadata_params(
     Ok((selector, start, end))
 }
 
+fn validate_range_window(start: i64, end: i64) -> Result<(), String> {
+    // `end - start` and the gRPC epoch conversion both overflow on a negative or reversed window.
+    if start < 0 {
+        return Err(format!(
+            "start must not be before the Unix epoch, got {start}"
+        ));
+    }
+    if end < start {
+        return Err(format!("end {end} must not be before start {start}"));
+    }
+    Ok(())
+}
+
 /// prometheus formatting query expressions
 
 // refer: https://prometheus.io/docs/prometheus/latest/querying/api/#formatting-query-expressions
@@ -1223,6 +1263,7 @@ fn validate_metadata_params(
             "status" : "success",
             "data" : "foo / bar"
         })),
+        (status = 400, description = "The query does not parse", content_type = "application/json", body = ()),
         (status = 500, description = "Failure", content_type = "application/json", body = ()),
     ),
     extensions(
@@ -1749,6 +1790,15 @@ impl promql_parser::util::ExprVisitor for MaxLookbackWindowVisitor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn validate_range_window_rejects_negative_and_inverted_windows() {
+        assert!(validate_range_window(0, 0).is_ok());
+        assert!(validate_range_window(1_000, 2_000).is_ok());
+        assert!(validate_range_window(-1, 10).is_err());
+        assert!(validate_range_window(i64::MIN, 10).is_err());
+        assert!(validate_range_window(10, 9).is_err());
+    }
 
     #[test]
     fn metric_reads_check_permission_for_every_non_root_user() {

@@ -261,6 +261,7 @@ mod m20261030_000001_add_agent_to_ai_chat_turns;
 mod m20261030_000001_add_suppress_repeats_to_alerts;
 mod m20261030_000001_create_org_domain_ownership_table;
 mod m20261030_000002_create_org_domain_ownership_req_table;
+mod m20261101_000001_create_oncall_slack;
 /// Shared body of the two `folder_id` migrations above; not a migration itself.
 mod workflow_folder_id;
 
@@ -460,6 +461,14 @@ pub(crate) async fn create_slack_tables(db: &sea_orm::DatabaseConnection) -> Res
     m20261025_000005_add_held_action_to_slack_link_requests::Migration
         .up(&SchemaManager::new(db))
         .await
+}
+
+/// Builds `oncall_chat_messages` with its keys, which `create_table_from_entity` omits.
+#[cfg(test)]
+pub(crate) async fn create_oncall_chat_messages_for_test<C: sea_orm::ConnectionTrait>(
+    db: &C,
+) -> Result<(), DbErr> {
+    m20261101_000001_create_oncall_slack::create_messages(db).await
 }
 
 /// Apply only `alert_acks`, idempotently, for tests in any crate.
@@ -771,6 +780,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261030_000001_add_suppress_repeats_to_alerts::Migration),
             Box::new(m20261030_000001_create_org_domain_ownership_table::Migration),
             Box::new(m20261030_000002_create_org_domain_ownership_req_table::Migration),
+            Box::new(m20261101_000001_create_oncall_slack::Migration),
             Box::new(m20261030_000001_add_agent_to_ai_chat_turns::Migration),
             Box::new(m20261016_000001_add_first_event_at_to_ai_chat_turns::Migration),
             Box::new(m20261020_000001_add_health_to_org_ai_toolsets::Migration),
@@ -884,12 +894,13 @@ mod tests {
             131,
             "m20261030_000002_create_org_domain_ownership_req_table",
         ),
-        (132, "m20261016_000001_add_first_event_at_to_ai_chat_turns"),
-        (133, "m20261020_000005_create_ai_turn_marks"),
-        (134, "m20261021_000005_create_ai_chat_imports"),
-        (135, "m20261021_000006_create_paid_overage_attribution"),
-        (136, "m20261021_000007_create_ai_approvals"),
-        (137, "m20261030_000001_add_agent_to_ai_chat_turns"),
+        (132, "m20261101_000001_create_oncall_slack"),
+        (133, "m20261016_000001_add_first_event_at_to_ai_chat_turns"),
+        (134, "m20261020_000005_create_ai_turn_marks"),
+        (135, "m20261021_000005_create_ai_chat_imports"),
+        (136, "m20261021_000006_create_paid_overage_attribution"),
+        (137, "m20261021_000007_create_ai_approvals"),
+        (138, "m20261030_000001_add_agent_to_ai_chat_turns"),
     ];
 
     // Two branches that each claim the next version merge cleanly, so a reused number must fail
@@ -1063,6 +1074,10 @@ mod tests {
             (
                 "m20261018_000001_create_slack_tables",
                 "m20261025_000005_add_held_action_to_slack_link_requests",
+            ),
+            (
+                "m20260806_000001_create_oncall_tables",
+                "m20261101_000001_create_oncall_slack",
             ),
             (
                 "m20261007_000001_create_ai_chat_turns",
