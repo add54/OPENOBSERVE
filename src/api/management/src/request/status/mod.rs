@@ -271,6 +271,8 @@ struct ConfigResponse<'a> {
     billing_group_allowed_orgs: String,
     #[cfg(feature = "enterprise")]
     workflows_enabled: bool,
+    #[cfg(feature = "enterprise")]
+    feature_revision: u32,
     features: HashMap<Feature, FeatureState>,
     feature_names: HashMap<String, String>,
 }
@@ -779,6 +781,8 @@ pub async fn zo_config(
         billing_group_allowed_orgs,
         #[cfg(feature = "enterprise")]
         workflows_enabled,
+        #[cfg(feature = "enterprise")]
+        feature_revision: runtime_definition().feature_revision,
         features: featuremap,
         feature_names,
     })
