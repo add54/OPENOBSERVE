@@ -38,7 +38,6 @@ pub struct QueryProfile {
     pub plan: ProfileNode,
 }
 
-/// One operator of an executed plan.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ProfileNode {
     pub name: String,
@@ -114,8 +113,7 @@ impl fmt::Display for OneLine<'_> {
     }
 }
 
-/// `remote` yields a remote scan's per-node profiles; its local children never ran, so they are
-/// skipped.
+/// `remote` yields each remote scan's per-node profiles, because its local children never ran.
 pub fn build_profile(
     plan: &dyn ExecutionPlan,
     remote: &dyn Fn(&dyn ExecutionPlan) -> Option<Vec<RemoteNodeProfile>>,
