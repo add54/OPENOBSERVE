@@ -231,8 +231,8 @@ describe("OTableBodyCell focusToolbar", () => {
     if (!cells()[0].textContent?.includes("cart")) await sort();
     await flushPromises();
     expect(boxes().map((b) => b.getAttribute("aria-label"))).toEqual([
-      "Select row cart",
-      "Select row checkout",
+      "Select row 2, cart",
+      "Select row 1, checkout",
     ]);
     await focus(cells()[0]);
     await key(cells()[0], " ");
@@ -251,10 +251,10 @@ describe("OTableBodyCell focusToolbar", () => {
       document
         .querySelector('tbody [data-test^="o2-table-select-"] button[role="checkbox"]')
         ?.getAttribute("aria-label");
-    expect(name()).toBe("Select row checkout");
+    expect(name()).toBe("Select row 1, checkout");
     await table.find('[data-test="o2-table-next-page-btn"]').trigger("click");
     await flushPromises();
-    expect(name()).toBe("Select row cart");
+    expect(name()).toBe("Select row 2, cart");
   });
 
   it("adds nothing without a hover-actions slot", async () => {

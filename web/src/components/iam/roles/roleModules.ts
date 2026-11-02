@@ -86,6 +86,7 @@ export const GROUP_ORDER_V2: ModuleGroupId[] = [
   "pipelines",
   "monitoring",
   "llmObservability",
+  "fleet",
   "access",
   "platform",
   "other",

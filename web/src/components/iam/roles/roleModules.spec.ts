@@ -188,6 +188,24 @@ describe("buildRoleModules - assistant v2 groups", () => {
     expect(Object.keys(MODULE_COPY).sort()).toEqual([...ASSISTANT].sort());
   });
 
+  it("starts the flag-on order with Data and keeps Fleet before Access", () => {
+    const withFleet = [
+      { key: "fleets", has_entities: true, order: 0 },
+      ...resources,
+      { key: "stream", has_entities: true, order: 99 },
+    ];
+    const groups = buildRoleModules(withFleet, { assistantV2: true }).map((module) => module.group);
+    expect(groups[0]).toBe("data");
+    expect(groups.indexOf("fleet")).toBeGreaterThan(groups.lastIndexOf("llmObservability"));
+    expect(groups.indexOf("fleet")).toBeLessThan(groups.indexOf("access"));
+    expect(GROUP_ORDER_V2[0]).toBe("data");
+    expect(GROUP_ORDER_V2).toContain("fleet");
+    expect(GROUP_ORDER_V2.indexOf("fleet")).toBe(GROUP_ORDER_V2.indexOf("access") - 1);
+    expect(new Set(GROUP_ORDER_V2)).toEqual(
+      new Set([...GROUP_ORDER.filter((group) => group !== "ai"), "assistant", "llmObservability"]),
+    );
+  });
+
   it("never reuses an Assistant icon in LLM observability", () => {
     const modules = buildRoleModules(resources, { assistantV2: true });
     const icons = (group: string) =>

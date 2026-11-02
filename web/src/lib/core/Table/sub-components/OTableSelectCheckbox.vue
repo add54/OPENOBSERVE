@@ -5,7 +5,7 @@ import { computed, inject, onMounted, ref } from "vue";
 import OCheckbox from "@/lib/forms/Checkbox/OCheckbox.vue";
 import type { I18nText } from "@/types/i18n";
 import type { CheckboxModelValue } from "@/lib/forms/Checkbox/OCheckbox.types";
-import { raw, useI18nTyped } from "@/types/i18n";
+import { useI18nTyped } from "@/types/i18n";
 import { OTableFocusToolbarKey } from "../OTable.types";
 
 const props = defineProps<{
@@ -33,8 +33,8 @@ const focusCtx = inject(OTableFocusToolbarKey, null);
 const ariaLabel = computed(() => {
   if (!focusCtx?.enabled.value) return undefined;
   if (props.rowId === "all") return t("components.table.selectAllRows");
-  return t("components.table.selectRow", {
-    name: raw(String((props.position ?? Number(props.rowId ?? 0)) + 1)),
+  return t("components.table.selectRowAt", {
+    index: (props.position ?? Number(props.rowId ?? 0)) + 1,
   });
 });
 
