@@ -1,0 +1,184 @@
+// Copyright 2026 OpenObserve Inc.
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+import { describe, expect, it, vi } from "vitest";
+import { mount } from "@vue/test-utils";
+import i18n from "@/locales";
+import store from "@/test/unit/helpers/store";
+import { gt } from "@/types/i18n";
+import type { AutoObserveCoverage } from "@/services/autoobserve";
+import CoverageServiceDrawer from "./CoverageServiceDrawer.vue";
+import { coverageFor, detectorsOf, type CoverageRow } from "./fixtures";
+import { toCoverageSource } from "./live/liveAdapter";
+import { LIVE_DOT } from "./live/liveCopy";
+
+vi.mock("vue-router", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
+}));
+
+const DrawerStub = { template: "<div><slot name='header' /><slot /></div>" };
+const ChartStub = { name: "CoverageMetricChart", props: ["def", "cell"], template: "<div />" };
+
+const monitor = (name: string) => ({
+  monitor_kind: "alert",
+  monitor_id: `${name}-id`,
+  monitor_name: name,
+  predicate: "",
+  last_data_at: null,
+});
+const cell = (state: string, by?: string) => ({
+  state,
+  evidence: by ? [monitor(by)] : [],
+  counts: {},
+});
+
+const liveRow = (cells: Record<string, ReturnType<typeof cell>>) =>
+  toCoverageSource(
+    gt,
+    {
+      view: "strict",
+      pass_at: Date.now() * 1000,
+      refreshed_at: null,
+      quality: null,
+      classes: [],
+      rows: [
+        { service_name: "checkout", cluster: "prod-eu", namespace: "shop", streams: [], cells },
+      ],
+    } as unknown as AutoObserveCoverage,
+    { status: "ready", retry: () => undefined },
+    "en-US",
+  ).rows[0];
+
+const mountDrawer = (row: CoverageRow, state: "watched" | "gap", live = true) =>
+  mount(CoverageServiceDrawer, {
+    props: {
+      row,
+      serviceStates: { [row.service]: state },
+      scenario: "demo",
+      ledger: [],
+      expanded: null,
+      anchor: "body",
+      fix: null,
+      message: "",
+      live,
+    },
+    global: {
+      plugins: [i18n, store],
+      stubs: { ODrawer: DrawerStub, CoverageMetricChart: ChartStub, CoverageSignalDetail: true },
+    },
+  });
+
+const chips = (wrapper: ReturnType<typeof mountDrawer>) =>
+  wrapper.findAll('[data-test^="autoobserve-coverage-drawer-chip-"]');
+
+describe("CoverageServiceDrawer in live mode", () => {
+  it("shows the table's three checks, with their cell words and dots, and nothing else", () => {
+    const row = liveRow({
+      errors: cell("none"),
+      latency: cell("silent", "checkout-p99"),
+      absence: cell("covered", "checkout-heartbeat"),
+      saturation: cell("none"),
+    });
+    const wrapper = mountDrawer(row, "watched");
+    const found = chips(wrapper);
+    expect(found.map((c) => c.attributes("data-test"))).toEqual([
+      "autoobserve-coverage-drawer-chip-errors",
+      "autoobserve-coverage-drawer-chip-latency",
+      "autoobserve-coverage-drawer-chip-absence",
+    ]);
+    expect(found.map((c) => c.text())).toEqual([
+      "Errors: No monitor",
+      "Latency: Silent",
+      "Absence: Covered",
+    ]);
+    const dot = (i: number) => found[i].find("span").classes().join(" ");
+    expect(dot(0)).toContain(LIVE_DOT.missing);
+    expect(dot(1)).toContain(LIVE_DOT.problem);
+    expect(dot(2)).toContain(LIVE_DOT.covered);
+    const charts = wrapper.findAllComponents(ChartStub).map((c) => c.props("def").signal);
+    expect(charts).toEqual(["errors", "latency"]);
+    const other = wrapper.find('[data-test="autoobserve-coverage-drawer-extra"]').text();
+    expect(other).toContain("Saturation");
+    expect(other).not.toContain("Absence");
+    expect(other).toContain("No monitor");
+    expect(other).not.toMatch(/\bNone\b/);
+    expect(wrapper.find('[data-test="autoobserve-coverage-drawer-logs"]').exists()).toBe(false);
+  });
+
+  it("counts detectors over the three checks, the same count the table and map use", () => {
+    const row = liveRow({
+      errors: cell("none"),
+      latency: cell("none"),
+      absence: cell("covered", "checkout-heartbeat"),
+      saturation: cell("none"),
+    });
+    expect(detectorsOf(row)).toBe(1);
+    expect(mountDrawer(row, "watched").text()).toContain("1 detector");
+  });
+
+  it("explains a gap from each check's own reason, grouping the checks with no monitor", () => {
+    const row = liveRow({
+      errors: cell("silent", "checkout-errors"),
+      latency: cell("blind", "checkout-p99"),
+      absence: cell("none"),
+    });
+    const wrapper = mountDrawer(row, "gap");
+    expect(wrapper.find('[data-test="autoobserve-coverage-drawer-state"]').text()).toBe(
+      "Coverage gap",
+    );
+    const lines = wrapper
+      .findAll('[data-test="autoobserve-coverage-drawer-gap-line"]')
+      .map((l) => l.text());
+    expect(lines).toEqual([
+      "Errors: checkout-errors matches, but it notifies no one",
+      "Latency: checkout-p99 matches, but it can't see its data",
+      "No monitor watches absence",
+    ]);
+    expect(wrapper.text()).not.toContain("No scoped monitor");
+  });
+
+  it("says once that no monitor watches any check, when none has one", () => {
+    const row = liveRow({ errors: cell("none"), latency: cell("none"), absence: cell("none") });
+    const lines = mountDrawer(row, "gap")
+      .findAll('[data-test="autoobserve-coverage-drawer-gap-line"]')
+      .map((l) => l.text());
+    expect(lines).toEqual(["No monitor watches errors, latency, or absence"]);
+  });
+
+  it("opens the absence check's detail from its chip, since absence has no chart", async () => {
+    const row = liveRow({
+      errors: cell("none"),
+      latency: cell("none"),
+      absence: cell("covered", "checkout-heartbeat"),
+    });
+    const wrapper = mountDrawer(row, "watched");
+    const DETAIL = '[data-test="autoobserve-coverage-drawer-absence-detail"]';
+    const chip = wrapper.find('[data-test="autoobserve-coverage-drawer-chip-absence"]');
+    expect(wrapper.find(DETAIL).exists()).toBe(false);
+    await chip.trigger("click");
+    expect(wrapper.find(DETAIL).exists()).toBe(true);
+    expect(chip.attributes("aria-expanded")).toBe("true");
+  });
+});
+
+describe("CoverageServiceDrawer in fixture mode", () => {
+  it("keeps the six design signals and the log patterns section", () => {
+    const row = coverageFor("demo", gt)[0];
+    const wrapper = mountDrawer(row, "watched", false);
+    expect(chips(wrapper)).toHaveLength(6);
+    expect(wrapper.find('[data-test="autoobserve-coverage-drawer-logs"]').exists()).toBe(true);
+  });
+});
