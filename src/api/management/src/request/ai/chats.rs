@@ -28,6 +28,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use bytes::Bytes;
+use config::utils::hash::{Sum64, fnv};
 use infra::table::{
     ai_approvals, ai_chat_feedback, ai_chat_imports,
     ai_chat_sessions::{self, ListCursor, ListFilter, Model, NO_SEQ, NewImport, STATUS_ACTIVE},
@@ -143,8 +144,7 @@ pub struct ChatSummary {
     pub active_turn: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_turn_id: Option<String>,
-    /// A hint: the chat waits on a confirmation request or approval card the caller has not
-    /// answered.
+    /// A hint: the chat waits on a request or approval card the caller has not answered.
     pub pending_approval: bool,
     /// The call id of that request, when it could be read.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -595,6 +595,8 @@ struct StateVersion {
     seq: i64,
     changed_at: i64,
     active: bool,
+    /// [`card_stamp`] of the chat's approval cards, which settle turns without a new event.
+    cards: u64,
     /// Set by events and the newest turn's age; a current copy's holds until that ages out.
     pending: bool,
 }
@@ -610,8 +612,14 @@ impl StateVersion {
             seq: row.last_committed_seq,
             changed_at,
             active,
+            cards: card_stamp(&[], 0),
             pending: false,
         }
+    }
+
+    fn with_cards(mut self, cards: &[ai_approvals::Model], now: i64) -> Self {
+        self.cards = card_stamp(cards, now);
+        self
     }
 
     /// A vote changes no event or turn record, so the version moves with the newest one too.
@@ -622,7 +630,8 @@ impl StateVersion {
 
     /// Whether a copy at `self` is current with `now`.
     fn current_with(&self, now: &Self) -> bool {
-        (self.seq, self.changed_at, self.active) == (now.seq, now.changed_at, now.active)
+        (self.seq, self.changed_at, self.active, self.cards)
+            == (now.seq, now.changed_at, now.active, now.cards)
     }
 
     fn parse(text: &str) -> Option<Self> {
@@ -636,10 +645,12 @@ impl StateVersion {
         let changed_at = parts.next()?.parse().ok()?;
         let active = flag(parts.next())?;
         let pending = flag(parts.next())?;
+        let cards = u64::from_str_radix(parts.next()?, 16).ok()?;
         parts.next().is_none().then_some(Self {
             seq,
             changed_at,
             active,
+            cards,
             pending,
         })
     }
@@ -649,11 +660,12 @@ impl std::fmt::Display for StateVersion {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}.{}.{}.{}",
+            "{}.{}.{}.{}.{:016x}",
             self.seq,
             self.changed_at,
             u8::from(self.active),
-            u8::from(self.pending)
+            u8::from(self.pending),
+            self.cards
         )
     }
 }
@@ -662,6 +674,22 @@ impl std::fmt::Display for StateVersion {
 pub(super) fn running_since(now: i64) -> i64 {
     let max_turn = get_o2_config().ai.chat_max_turn_secs.max(60) as i64;
     now - (max_turn + RUNNING_GRACE_SECS) * MICROS_PER_SEC
+}
+
+/// Changes whenever a card is raised, decided, extended, expires by time or is purged.
+pub(super) fn card_stamp(cards: &[ai_approvals::Model], now: i64) -> u64 {
+    let mut key = String::new();
+    for card in cards {
+        key.push_str(&format!(
+            "|{}:{}:{}:{:?}:{}",
+            card.id,
+            card.status,
+            card.expires_at,
+            card.decided_at,
+            card.expires_at <= now
+        ));
+    }
+    fnv::new().sum64(&key)
 }
 
 pub(super) fn admit_error_response(error: AdmitError) -> Response {
@@ -752,6 +780,33 @@ pub(super) async fn attach_turn_status_at(
         ..Default::default()
     };
     build_history(turns, &records, running_since(now), cut).turns
+}
+
+/// The approvals OpenObserve stored for the caller's chat, readable on every replica.
+pub(super) async fn chat_approvals(
+    org_id: &str,
+    session_id: &str,
+    user_email: &str,
+) -> Option<Vec<ai_approvals::Model>> {
+    match ai_approvals::list_for_session(org_id, session_id, user_email).await {
+        Ok(rows) => Some(rows),
+        Err(e) => {
+            log::warn!("[AI-CHAT] approvals of {org_id}/{session_id} unreadable: {e}");
+            None
+        }
+    }
+}
+
+pub(super) fn approval_view(row: &ai_approvals::Model) -> Value {
+    let parse = |text: &str| serde_json::from_str::<Value>(text).unwrap_or(Value::Null);
+    serde_json::json!({
+        "id": row.id,
+        "status": row.status,
+        "scope": row.scope,
+        "card": parse(&row.card),
+        "resolved": row.resolved.as_deref().map_or(Value::Null, parse),
+        "expires_at": row.expires_at,
+    })
 }
 
 /// The SSO browser login an authenticated request carries, if any (see [`cookie_login`]).
@@ -1035,7 +1090,10 @@ pub async fn get(
         .cloned();
     let feedback = caller_feedback(&row, &user_email).await;
     let newest_vote = newest_vote(&feedback);
-    let mut version = StateVersion::of(&row, &records, active.is_some()).with_vote(newest_vote);
+    let cards = chat_approvals(&org_id, &row.session_id, &user_email).await;
+    let mut version = StateVersion::of(&row, &records, active.is_some())
+        .with_vote(newest_vote)
+        .with_cards(cards.as_deref().unwrap_or_default(), now);
     let known = params
         .known_version
         .as_deref()
@@ -1043,6 +1101,7 @@ pub async fn get(
     let answers = answers_in_newest(&org_id, &user_email, &row.session_id, records.last()).await;
     // An answer since the copy may leave another request pending; only a full read can count.
     if params.known_seq == Some(row.last_committed_seq)
+        && cards.is_some()
         && let Some(known) = known
             .filter(|k| k.current_with(&version))
             .filter(|k| !(k.pending && answers > 0))
@@ -1068,7 +1127,6 @@ pub async fn get(
         Err(resp) => return resp,
     };
     let newest = records.last().filter(|r| recent_turn(r, now));
-    let cards = chat_approvals(&org_id, &row.session_id, &user_email).await;
     let pending = pending_approval_in(&events, newest)
         .filter(|_| unanswered(confirmations_in(&events, newest), answers))
         .or_else(|| {
@@ -1081,7 +1139,7 @@ pub async fn get(
     let known_seq = params
         .known_seq
         .filter(|n| (NO_SEQ..row.last_committed_seq).contains(n))
-        .filter(|_| known.is_some_and(|k| newest_vote <= k.changed_at));
+        .filter(|_| known.is_some_and(|k| newest_vote <= k.changed_at && k.cards == version.cards));
     let cut = Cut {
         cutoff: row.last_committed_seq,
         known_seq,
@@ -1102,6 +1160,7 @@ pub async fn get(
         openobserve_core::ai_chat::projection::attach_card_outcomes(
             turn,
             approvals.as_deref().unwrap_or_default(),
+            now,
         );
     }
     let seed = row
@@ -1931,33 +1990,6 @@ fn project_turns(events: &[DurableEvent]) -> Vec<Value> {
         Some(Value::Array(turns)) => turns,
         _ => Vec::new(),
     }
-}
-
-/// The approvals OpenObserve stored for the caller's chat, readable on every replica.
-async fn chat_approvals(
-    org_id: &str,
-    session_id: &str,
-    user_email: &str,
-) -> Option<Vec<ai_approvals::Model>> {
-    match ai_approvals::list_for_session(org_id, session_id, user_email).await {
-        Ok(rows) => Some(rows),
-        Err(e) => {
-            log::warn!("[AI-CHAT] approvals of {org_id}/{session_id} unreadable: {e}");
-            None
-        }
-    }
-}
-
-fn approval_view(row: &ai_approvals::Model) -> Value {
-    let parse = |text: &str| serde_json::from_str::<Value>(text).unwrap_or(Value::Null);
-    serde_json::json!({
-        "id": row.id,
-        "status": row.status,
-        "scope": row.scope,
-        "card": parse(&row.card),
-        "resolved": row.resolved.as_deref().map_or(Value::Null, parse),
-        "expires_at": row.expires_at,
-    })
 }
 
 /// Each listed chat's turn state, read in one query or search per kind for the whole page.
@@ -2895,23 +2927,26 @@ mod tests {
             seq: 12,
             changed_at: 1700,
             active: true,
+            cards: 0xab,
             pending: true,
         };
-        assert_eq!(v.to_string(), "12.1700.1.1");
-        assert_eq!(StateVersion::parse("12.1700.1.1"), Some(v));
+        assert_eq!(v.to_string(), "12.1700.1.1.00000000000000ab");
+        assert_eq!(StateVersion::parse("12.1700.1.1.00000000000000ab"), Some(v));
         assert_eq!(
-            StateVersion::parse("-1.0.0.0").map(|v| (v.seq, v.active, v.pending)),
+            StateVersion::parse("-1.0.0.0.0").map(|v| (v.seq, v.active, v.pending)),
             Some((-1, false, false))
         );
-        // A version from before the pending flag is read in full once.
+        // A version from before the pending flag or the card stamp is read in full once.
         for bad in [
             "",
             "12",
             "12.1700",
             "12.1700.1",
-            "12.1700.2.0",
-            "12.1700.1.0.0",
-            "x.1.1.1",
+            "12.1700.1.1",
+            "12.1700.2.0.0",
+            "12.1700.1.0.zz",
+            "12.1700.1.0.0.0",
+            "x.1.1.1.0",
         ] {
             assert_eq!(StateVersion::parse(bad), None, "{bad}");
         }
@@ -4182,6 +4217,42 @@ mod tests {
         let now = copy.with_vote(newest_vote(&feedback));
         assert!(!copy.current_with(&now));
         assert_eq!(now.changed_at, 500);
+    }
+
+    #[test]
+    fn a_cached_copy_goes_stale_when_its_card_expires_is_decided_or_extended() {
+        let card = ai_approvals::Model {
+            id: "apr_1".into(),
+            org_id: "acme".into(),
+            session_id: "s1".into(),
+            user_email: "alice@acme.io".into(),
+            tool: Some("UpdateAlert".into()),
+            status: ai_approvals::STATUS_PENDING.into(),
+            scope: None,
+            card: "{}".into(),
+            resolved: None,
+            expires_at: 1_000,
+            created_at: 10,
+            decided_at: None,
+        };
+        let records = vec![record("t1", TURN_COMPLETED, (Some(1), Some(4)), 100)];
+        let base = StateVersion::of(&chat_row(), &records, false);
+        let copy = base.with_cards(std::slice::from_ref(&card), 900);
+        let parsed = StateVersion::parse(&copy.to_string()).unwrap();
+        assert!(parsed.current_with(&base.with_cards(std::slice::from_ref(&card), 950)));
+        assert!(!parsed.current_with(&base.with_cards(std::slice::from_ref(&card), 1_000)));
+        assert!(!parsed.current_with(&base));
+        let decided = ai_approvals::Model {
+            status: ai_approvals::STATUS_APPROVED.into(),
+            decided_at: Some(950),
+            ..card.clone()
+        };
+        assert!(!parsed.current_with(&base.with_cards(&[decided], 950)));
+        let extended = ai_approvals::Model {
+            expires_at: 2_000,
+            ..card
+        };
+        assert!(!parsed.current_with(&base.with_cards(&[extended], 950)));
     }
 
     #[test]

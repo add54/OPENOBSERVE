@@ -288,8 +288,10 @@ struct StreamState {
     follow_ups: Vec<String>,
     turn_call_ids: Vec<String>,
     step_call_ids: HashSet<String>,
-    /// Inside a fenced code block of the answer, where `[^...]` is code, not a marker.
-    in_code: bool,
+    /// Where the answer's code is, since `[^...]` inside code is not a marker.
+    code: CodeSpan,
+    /// Whether the answer's current line already shows more than indentation.
+    mid_line: bool,
 }
 
 impl StreamState {
@@ -320,23 +322,52 @@ impl StreamState {
 
     /// Markers naming a visible step keep its call id, others are dropped, as o2-ai streams them.
     fn rewrite_claim_markers(&mut self, text: &str) -> String {
-        let mut out = Vec::new();
-        for (index, segment) in text.split(CODE_FENCE).enumerate() {
-            if index > 0 {
-                self.in_code = !self.in_code;
-            }
-            if self.in_code {
-                out.push(segment.to_string());
+        let bytes = text.as_bytes();
+        let mut out = String::with_capacity(text.len());
+        let (mut from, mut i) = (0, 0);
+        while i < bytes.len() {
+            let byte = bytes[i];
+            if byte == b'`' || byte == b'~' {
+                let run = bytes[i..].iter().take_while(|&&b| b == byte).count();
+                let next = self.code.after_run(byte, run, self.mid_line);
+                if next != self.code {
+                    self.push_segment(&mut out, &text[from..i]);
+                    out.push_str(&text[i..i + run]);
+                    from = i + run;
+                    self.code = next;
+                }
+                self.mid_line = true;
+                i += run;
                 continue;
             }
-            let rewritten = CLAIM_MARKER.replace_all(segment, |m: &regex::Captures<'_>| {
-                self.step_call_id(&m[1])
-                    .map(|call_id| format!("[^{call_id}]"))
-                    .unwrap_or_default()
-            });
-            out.push(rewritten.into_owned());
+            if byte == b'\n' {
+                // An inline span never crosses a line, so a stray backtick cannot hide the rest.
+                if matches!(self.code, CodeSpan::Inline(_)) {
+                    self.push_segment(&mut out, &text[from..i]);
+                    from = i;
+                    self.code = CodeSpan::Prose;
+                }
+                self.mid_line = false;
+            } else if byte != b' ' && byte != b'\t' {
+                self.mid_line = true;
+            }
+            i += 1;
         }
-        out.join(CODE_FENCE)
+        self.push_segment(&mut out, &text[from..]);
+        out
+    }
+
+    fn push_segment(&self, out: &mut String, segment: &str) {
+        if self.code != CodeSpan::Prose {
+            out.push_str(segment);
+            return;
+        }
+        let rewritten = CLAIM_MARKER.replace_all(segment, |m: &regex::Captures<'_>| {
+            self.step_call_id(&m[1])
+                .map(|call_id| format!("[^{call_id}]"))
+                .unwrap_or_default()
+        });
+        out.push_str(&rewritten);
     }
 
     fn next_fence(&self, text: &str) -> Option<(usize, &'static str)> {
@@ -569,6 +600,29 @@ impl StreamState {
         }
         self.last_tools_call_info = None;
         frames.push(Value::Object(event));
+    }
+}
+
+/// The code an answer's scan is inside, by its opening run's character and length.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum CodeSpan {
+    #[default]
+    Prose,
+    Inline(usize),
+    Fence(u8, usize),
+}
+
+impl CodeSpan {
+    /// The state after a run of `run` backticks or tildes, judged as o2-ai judges it.
+    fn after_run(self, byte: u8, run: usize, mid_line: bool) -> Self {
+        let fence_ok = byte == b'`' || !mid_line;
+        match self {
+            Self::Prose if run >= 3 && fence_ok => Self::Fence(byte, run),
+            Self::Prose if byte == b'`' => Self::Inline(run),
+            Self::Inline(n) if byte == b'`' && run == n => Self::Prose,
+            Self::Fence(open, n) if byte == open && run >= n && fence_ok => Self::Prose,
+            other => other,
+        }
     }
 }
 
@@ -1100,9 +1154,8 @@ pub fn attach_decisions(turn: &mut Value, decisions: &[Value]) {
     }
 }
 
-/// Settles each queued call's result frame with the outcome its stored card (`approval_view`)
-/// records.
-pub fn attach_card_outcomes(turn: &mut Value, cards: &[Value]) {
+/// Settles each queued call's result frame with the outcome its stored card records at `now`.
+pub fn attach_card_outcomes(turn: &mut Value, cards: &[Value], now: i64) {
     let Some(Value::Array(frames)) = turn.get_mut("frames") else {
         return;
     };
@@ -1117,7 +1170,7 @@ pub fn attach_card_outcomes(turn: &mut Value, cards: &[Value]) {
         else {
             continue;
         };
-        let Some((success, error_type, message)) = card_outcome(card) else {
+        let Some((success, error_type, message)) = card_outcome(card, now) else {
             continue;
         };
         let tool = frame
@@ -1828,8 +1881,12 @@ fn unrun_call(result: &Map<String, Value>, response_body: &Value) -> Option<Map<
 }
 
 /// `(success, error_type, message)` of a decided card; `None` while it still waits.
-fn card_outcome(card: &Value) -> Option<(bool, Option<&'static str>, Option<String>)> {
-    let status = card["status"].as_str().unwrap_or_default();
+fn card_outcome(card: &Value, now: i64) -> Option<(bool, Option<&'static str>, Option<String>)> {
+    // A card past its expiry is expired before the purge marks it, as the pending flag says.
+    let status = match card["status"].as_str().unwrap_or_default() {
+        "pending" if card["expires_at"].as_i64().is_some_and(|at| at <= now) => "expired",
+        status => status,
+    };
     let resolved = &card["resolved"];
     let detail = resolved["detail"].as_str().map(str::to_string);
     let outcome = resolved["outcome"].as_str().unwrap_or(status);
@@ -3084,7 +3141,7 @@ mod tests {
             json!({"id": "apr_x", "status": "expired", "resolved": null}),
             json!({"id": "apr_p", "status": "pending", "resolved": null}),
         ];
-        attach_card_outcomes(&mut turn, &cards);
+        attach_card_outcomes(&mut turn, &cards, 0);
         let seen: Vec<(bool, &str, &str)> = turn["frames"]
             .as_array()
             .unwrap()
@@ -3111,6 +3168,15 @@ mod tests {
                 (false, APPROVAL_PENDING, "Waiting"),
             ]
         );
+
+        let card = [json!({"id": "apr_p", "status": "pending", "expires_at": 100})];
+        let settled = |now: i64| {
+            let mut turn = json!({"frames": [frame("apr_p")]});
+            attach_card_outcomes(&mut turn, &card, now);
+            turn["frames"][0]["error_type"].clone()
+        };
+        assert_eq!(settled(99), APPROVAL_PENDING);
+        assert_eq!(settled(100), "approval_expired");
     }
 
     #[test]
@@ -3331,6 +3397,40 @@ mod tests {
             "{text}"
         );
         assert!(code.contains("[^1]"), "{text}");
+    }
+
+    #[test]
+    fn a_reopened_answer_leaves_inline_code_and_tilde_fences_alone() {
+        let first = last_frames(&session_answering("Done.", "sre", Value::Null));
+        let step = first
+            .iter()
+            .find(|f| f["type"] == "tool_call")
+            .and_then(|f| f["call_id"].as_str())
+            .unwrap()
+            .to_string();
+        let answer = format!(
+            "Use `re.sub(r\"[^1]\", \"\", value)` here [^{step}].\n~~~python\nx = \"[^99]\"\n~~~\n\
+             A `stray tick [^99]\nthen [^{step}][^99] and ``a`[^1]`` done.\n"
+        );
+        let text = answer_text(&last_frames(&session_answering(
+            &answer,
+            "sre",
+            Value::Null,
+        )));
+        assert!(
+            text.contains(&format!("`re.sub(r\"[^1]\", \"\", value)` here [^{step}].")),
+            "{text}"
+        );
+        assert!(text.contains("x = \"[^99]\"\n~~~"), "{text}");
+        assert!(
+            text.contains(&format!("then [^{step}] and ``a`[^1]`` done.")),
+            "{text}"
+        );
+        assert!(text.contains("`stray tick [^99]\n"), "{text}");
+        assert_eq!(
+            StreamState::default().rewrite_claim_markers("a ~~~ b [^1]"),
+            "a ~~~ b "
+        );
     }
 
     #[test]

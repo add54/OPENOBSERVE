@@ -36,7 +36,7 @@ use config::{
     },
 };
 use infra::table::{
-    ai_chat_imports,
+    ai_approvals, ai_chat_imports,
     ai_chat_sessions::{self, Model as ChatModel, NO_SEQ, NewFork, STATUS_ACTIVE},
     ai_chat_shares::{
         self, MODE_LIVE, MODE_SNAPSHOT, Model as ShareModel, NewShare, ShareSettings,
@@ -60,8 +60,8 @@ use utoipa::ToSchema;
 
 use super::{
     chats::{
-        MAX_TITLE_CHARS, admit_error_response, attach_turn_status_at, history_not_enabled,
-        load_turns, owned_chat, running_since, user_email,
+        MAX_TITLE_CHARS, admit_error_response, approval_view, attach_turn_status_at, card_stamp,
+        chat_approvals, history_not_enabled, load_turns, owned_chat, running_since, user_email,
     },
     error::{self, AiErrorCode, AiErrorEnvelope},
 };
@@ -1185,11 +1185,12 @@ async fn fork_seed_of(
 ) -> Result<Value, Response> {
     let seq = ai_chat_shares::visible_seq(share, chat.last_committed_seq);
     let records = turn_records(chat).await;
+    let (cards, stamp, at) = shared_cards(share, chat).await;
     let key = (
         share.id.clone(),
-        state_version(share, seq, &records, running_since(now_micros())),
+        state_version(share, seq, &records, running_since(now_micros()), stamp),
     );
-    let (turns, ..) = shared_turns(share, chat, seq, key, reader).await?;
+    let (turns, ..) = shared_turns(share, chat, seq, key, reader, (&cards, at)).await?;
     let (turns, _) = newest_within(turns.as_ref().clone(), SEED_MAX_BYTES);
     let as_of = if share.mode == MODE_SNAPSHOT {
         share.updated_at
@@ -1432,7 +1433,8 @@ async fn read_shared(
     let seq = ai_chat_shares::visible_seq(&share, chat.last_committed_seq);
     let records = turn_records(&chat).await;
     let since = running_since(now_micros());
-    let state_version = state_version(&share, seq, &records, since);
+    let (cards, stamp, at) = shared_cards(&share, &chat).await;
+    let state_version = state_version(&share, seq, &records, since, stamp);
     let not_modified =
         params.known_seq == Some(seq) && params.known_version.as_deref() == Some(&state_version);
     let mut body = SharedChat {
@@ -1455,10 +1457,11 @@ async fn read_shared(
     };
     if !not_modified {
         let key = (share.id.clone(), body.state_version.clone());
-        let (turns, truncated, hidden) = match shared_turns(&share, &chat, seq, key, reader).await {
-            Ok(shown) => shown,
-            Err(resp) => return resp,
-        };
+        let (turns, truncated, hidden) =
+            match shared_turns(&share, &chat, seq, key, reader, (&cards, at)).await {
+                Ok(shown) => shown,
+                Err(resp) => return resp,
+            };
         body.turns = Some(turns);
         body.truncated = truncated;
         body.hidden = (!hidden.is_empty()).then(|| hidden.as_ref().clone());
@@ -1478,6 +1481,7 @@ async fn shared_turns(
     seq: i64,
     key: TurnKey,
     reader: Reader<'_>,
+    (cards, at): (&[Value], i64),
 ) -> Result<Shown, Response> {
     let public = reader.viewer.is_none();
     if public && let Some(shown) = PUBLIC_TURNS.get(&key, Instant::now()) {
@@ -1491,8 +1495,11 @@ async fn shared_turns(
     cut.last_committed_seq = seq;
     // A snapshot hides turns admitted after it was taken, including failures that stored nothing.
     let admitted_by = (share.mode == MODE_SNAPSHOT).then_some(share.updated_at);
-    let turns =
+    let mut turns =
         attach_turn_status_at(&cut, load_turns(&cut, reader.auth).await?, admitted_by).await;
+    for turn in turns.iter_mut() {
+        projection::attach_card_outcomes(turn, cards, at);
+    }
     let hidden = hidden_steps(&chat.org_id, &turns, reader.viewer, share.redact_tools).await;
     let view = projection::ReaderView {
         hidden: Some(&hidden),
@@ -1507,6 +1514,20 @@ async fn shared_turns(
         PUBLIC_TURNS.put(key, shown.clone(), Instant::now());
     }
     Ok(shown)
+}
+
+/// The owner's cards as readers see them, as views, their [`card_stamp`] and the time they hold at.
+async fn shared_cards(share: &ShareModel, chat: &ChatModel) -> (Vec<Value>, u64, i64) {
+    let cards = chat_approvals(&chat.org_id, &chat.session_id, &chat.user_email)
+        .await
+        .unwrap_or_default();
+    let (cards, at) = if share.mode == MODE_SNAPSHOT {
+        (cards_as_of(cards, share.updated_at), share.updated_at)
+    } else {
+        (cards, now_micros())
+    };
+    let stamp = card_stamp(&cards, at);
+    (cards.iter().map(approval_view).collect(), stamp, at)
 }
 
 async fn count_read(share_id: &str) {
@@ -1901,15 +1922,16 @@ fn reader_view(
     turns
 }
 
-/// Changes whenever a reader's copy would: the seq, a shown turn's status or error, or a setting.
+/// Changes whenever a reader's copy would: the seq, a turn's status or error, a card, or a setting.
 fn state_version(
     share: &ShareModel,
     seq: i64,
     records: &[TurnRecord],
     running_since: i64,
+    cards: u64,
 ) -> String {
     let mut key = format!(
-        "{seq}|{}|{}|{}|{:?}",
+        "{seq}|{}|{}|{}|{:?}|{cards:x}",
         share.mode, share.redact_tools, share.hide_attachments, share.snapshot_seq
     );
     for record in records
@@ -1926,6 +1948,23 @@ fn state_version(
         key.push_str(&format!("|{}:{status}:{error_code}", record.turn_id));
     }
     format!("{seq}.{:016x}", fnv::new().sum64(&key))
+}
+
+/// The cards raised by `at`, each undecided if its decision came after.
+fn cards_as_of(cards: Vec<ai_approvals::Model>, at: i64) -> Vec<ai_approvals::Model> {
+    cards
+        .into_iter()
+        .filter(|card| card.created_at <= at)
+        .map(|mut card| {
+            if card.decided_at.is_some_and(|decided| decided > at) {
+                card.status = ai_approvals::STATUS_PENDING.into();
+                card.scope = None;
+                card.resolved = None;
+                card.decided_at = None;
+            }
+            card
+        })
+        .collect()
 }
 
 /// The newest `turns` whose JSON fits in `max_bytes`, and whether any were left out.
@@ -2370,34 +2409,87 @@ mod tests {
             record("t1", "completed", 0, 5),
             record("t2", TURN_RUNNING, 5, 10),
         ];
-        let base = state_version(&live, 4, &running, 0);
-        assert_eq!(base, state_version(&live, 4, &running, 0));
+        let base = state_version(&live, 4, &running, 0, 0);
+        assert_eq!(base, state_version(&live, 4, &running, 0, 0));
         assert!(base.starts_with("4."));
         let mut done = running.clone();
         done[1].status = "completed".into();
-        assert_ne!(base, state_version(&live, 4, &done, 0));
+        assert_ne!(base, state_version(&live, 4, &done, 0, 0));
         assert_ne!(
             base,
-            state_version(&live, 4, &running, 11),
+            state_version(&live, 4, &running, 11, 0),
             "running turn went stale"
         );
         let mut failed = done.clone();
         failed[1].error_code = Some("agent_error".into());
         assert_ne!(
-            state_version(&live, 4, &done, 0),
-            state_version(&live, 4, &failed, 0)
+            state_version(&live, 4, &done, 0, 0),
+            state_version(&live, 4, &failed, 0, 0)
         );
         let mut redacted = live.clone();
         redacted.redact_tools = true;
-        assert_ne!(base, state_version(&redacted, 4, &running, 0));
+        assert_ne!(base, state_version(&redacted, 4, &running, 0, 0));
         let mut snap = share(MODE_SNAPSHOT, VISIBILITY_ORG);
         snap.snapshot_seq = Some(2);
-        let before = state_version(&snap, 2, &running[..1], 0);
+        let before = state_version(&snap, 2, &running[..1], 0, 0);
         assert_eq!(
             before,
-            state_version(&snap, 2, &running, 0),
+            state_version(&snap, 2, &running, 0, 0),
             "turn after the cut"
         );
+        assert_ne!(
+            base,
+            state_version(&live, 4, &running, 0, 7),
+            "a card moved"
+        );
+    }
+
+    #[test]
+    fn a_shared_approved_write_reads_as_done_and_a_snapshot_keeps_its_time() {
+        let card = |id: &str, created_at: i64, decided_at: Option<i64>| ai_approvals::Model {
+            id: id.into(),
+            org_id: "acme".into(),
+            session_id: "s1".into(),
+            user_email: "alice@acme.io".into(),
+            tool: Some("UpdateAlert".into()),
+            status: if decided_at.is_some() {
+                ai_approvals::STATUS_APPROVED.into()
+            } else {
+                ai_approvals::STATUS_PENDING.into()
+            },
+            scope: None,
+            card: "{}".into(),
+            resolved: decided_at.map(|_| r#"{"outcome":"approved"}"#.into()),
+            expires_at: 1_000,
+            created_at,
+            decided_at,
+        };
+        let turn = || {
+            json!({"frames": [{"type": "tool_result", "tool": "UpdateAlert", "success": false,
+                "error_type": "approval_pending", "approval_id": "apr_1", "message": "Waiting"}]})
+        };
+        let shown = |cards: Vec<ai_approvals::Model>, redact: bool| {
+            let views: Vec<Value> = cards.iter().map(approval_view).collect();
+            let mut turn = turn();
+            projection::attach_card_outcomes(&mut turn, &views, 0);
+            let view = projection::ReaderView {
+                hidden: None,
+                hide_attachments: false,
+            };
+            reader_view(vec![turn], redact, &view).remove(0)["frames"][0].clone()
+        };
+        let cards = vec![card("apr_1", 10, Some(50)), card("apr_2", 90, None)];
+        for redact in [false, true] {
+            let frame = shown(cards.clone(), redact);
+            assert_eq!(frame["success"], true, "{frame}");
+            assert!(frame.get("error_type").is_none(), "{frame}");
+        }
+        let early = cards_as_of(cards.clone(), 40);
+        assert_eq!(early.len(), 1);
+        assert_eq!(early[0].status, ai_approvals::STATUS_PENDING);
+        assert!(early[0].resolved.is_none() && early[0].decided_at.is_none());
+        assert_eq!(shown(early, false)["error_type"], "approval_pending");
+        assert_eq!(cards_as_of(cards.clone(), 60)[0], cards[0]);
     }
 
     #[test]
