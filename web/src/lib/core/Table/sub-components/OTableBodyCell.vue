@@ -452,6 +452,10 @@ watch(isCellActionActive, async (active) => {
 
 async function placeCellActions() {
   await nextTick();
+  placeCellActionsNow();
+}
+
+function placeCellActionsNow() {
   const bar = cellActionsEl.value?.getBoundingClientRect();
   const cellRect = cellEl.value?.getBoundingClientRect();
   if (!bar || !cellRect) return;
@@ -460,10 +464,11 @@ async function placeCellActions() {
     cellActionsY.value = cellRect.top + cellRect.height / 2;
     // A wide cell holds the bar at its own end, so the next cell's value stays readable.
     const inside = cellRect.width >= bar.width * 2;
-    cellActionsX.value =
+    const x =
       !inside && cellRect.right + bar.width <= window.innerWidth
         ? cellRect.right
         : cellRect.right - bar.width;
+    cellActionsX.value = Math.min(Math.max(x, 0), Math.max(window.innerWidth - bar.width, 0));
     return;
   }
   // The sticky header, not the window edge, is the ceiling: flip below rather than cover it.
@@ -484,6 +489,17 @@ async function placeCellActions() {
 }
 
 onBeforeUnmount(() => window.removeEventListener("scroll", onScrollDismiss, true));
+
+// Slot content such as the AI buttons renders after the first measure, widening the bar.
+let cellActionsObserver: ResizeObserver | null = null;
+watch(cellActionsEl, (el) => {
+  cellActionsObserver?.disconnect();
+  cellActionsObserver = null;
+  if (!el || typeof ResizeObserver === "undefined") return;
+  cellActionsObserver = new ResizeObserver(() => placeCellActionsNow());
+  cellActionsObserver.observe(el);
+});
+onBeforeUnmount(() => cellActionsObserver?.disconnect());
 
 const TOOLBAR_CONTROLS =
   "button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex='-1'])";

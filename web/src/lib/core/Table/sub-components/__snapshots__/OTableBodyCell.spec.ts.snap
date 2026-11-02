@@ -1,7 +1,7 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
 exports[`OTableBodyCell default render > is byte-identical without focusToolbar (snapshot taken before the prop existed) 1`] = `
-"<tbody data-test="o2-table-body">
+"<tbody class="transition-opacity motion-safe:animate-in motion-safe:fade-in-40 motion-safe:duration-200 motion-safe:ease-out" data-test="o2-table-body">
   <!-- Spans every visible column: a heading is about the run below it, not
          about one column. -->
   <tr data-v-5e072a9b="" data-test="o2-table-row-0" class="group/row transition-[background-color] duration-(--duration-hover-out) hover:duration-(--duration-hover-in) hover:bg-table-row-hover-bg hover:[--color-text-secondary:var(--color-table-row-text-secondary-tinted)]" style="height: var(--table-row-height, 2.25rem);">

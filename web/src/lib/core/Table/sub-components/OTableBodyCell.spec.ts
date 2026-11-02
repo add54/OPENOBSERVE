@@ -1,7 +1,7 @@
 // Copyright 2026 OpenObserve Inc.
 
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { h } from "vue";
 
 import OTable from "../OTable.vue";
@@ -255,6 +255,53 @@ describe("OTableBodyCell focusToolbar", () => {
     await table.find('[data-test="o2-table-next-page-btn"]').trigger("click");
     await flushPromises();
     expect(name()).toBe("Select row 2, cart");
+  });
+
+  it("re-places the toolbar inside the viewport when its buttons render late on the last column", async () => {
+    const watchers = new Map<Element, () => void>();
+    const resized = () => watchers.get(toolbar()!)?.();
+    const observer = globalThis.ResizeObserver;
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(private cb: () => void) {}
+        observe(el: Element) {
+          watchers.set(el, this.cb);
+        }
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    let barWidth = 0;
+    let cellLeft = 1131;
+    const rect = (left: number, width: number) =>
+      ({ left, right: left + width, width, top: 100, bottom: 130, height: 30 }) as DOMRect;
+    const spy = vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (
+      this: Element,
+    ) {
+      if (this.classList.contains("o2-table-cell-hover-actions")) return rect(0, barWidth);
+      if (this.tagName === "TD") return rect(cellLeft, 300);
+      return rect(0, 0);
+    });
+    const width = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
+    try {
+      render({ focusToolbar: true });
+      await flushPromises();
+      await focus(cells()[0]);
+      barWidth = 120;
+      resized();
+      await flushPromises();
+      expect(parseFloat(toolbar()!.style.left)).toBe(1431 - 120);
+      cellLeft = 1300;
+      resized();
+      await flushPromises();
+      expect(parseFloat(toolbar()!.style.left)).toBe(1440 - 120);
+    } finally {
+      spy.mockRestore();
+      vi.stubGlobal("ResizeObserver", observer);
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: width });
+    }
   });
 
   it("adds nothing without a hover-actions slot", async () => {
