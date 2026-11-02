@@ -375,6 +375,44 @@ describe("Index List", async () => {
     expect(mockGetFilterExpressionByFieldType).toHaveBeenCalledWith("field", "value", "include");
   });
 
+  it("keeps the loaded fields up while the same streams reload, and shows another stream's only once loaded", async () => {
+    const stream = wrapper.vm.searchObj.data.stream;
+    stream.selectedStream = ["default"];
+    stream.selectedStreamFields = [{ name: "level" }];
+    await flushPromises();
+    wrapper.vm.searchObj.loadingStream = true;
+    await flushPromises();
+    expect(wrapper.vm.showFieldListSkeleton).toBe(false);
+
+    stream.selectedStream = ["other"];
+    await flushPromises();
+    expect(wrapper.vm.showFieldListSkeleton).toBe(true);
+
+    stream.selectedStreamFields = [{ name: "msg" }];
+    await flushPromises();
+    expect(wrapper.vm.showFieldListSkeleton).toBe(true);
+
+    wrapper.vm.searchObj.loadingStream = false;
+    await flushPromises();
+    expect(wrapper.vm.showFieldListSkeleton).toBe(false);
+  });
+
+  it("keeps the skeleton while the fields wait for their groups", async () => {
+    const stream = wrapper.vm.searchObj.data.stream;
+    stream.selectedStream = ["cold"];
+    wrapper.vm.searchObj.loadingStream = true;
+    await flushPromises();
+    stream.selectedStreamFields = [{ name: "msg" }];
+    wrapper.vm.searchObj.loadingFieldGroups = true;
+    wrapper.vm.searchObj.loadingStream = false;
+    await flushPromises();
+    expect(wrapper.vm.showFieldListSkeleton).toBe(true);
+
+    wrapper.vm.searchObj.loadingFieldGroups = false;
+    await flushPromises();
+    expect(wrapper.vm.showFieldListSkeleton).toBe(false);
+  });
+
   it("toggleSchema sets loadingStream and calls extractFields", async () => {
     wrapper.vm.searchObj.loadingStream = false;
     await wrapper.vm.toggleSchema();
@@ -3153,6 +3191,16 @@ describe("Stream picker — internal streams", () => {
       "_rumdata",
       "_anomalies",
     ]);
+  });
+
+  it("anchors the selected-streams tooltip to the stream select, not the live region", async () => {
+    wrapper.vm.searchObj.data.stream.selectedStream = ["default", "k8s_events"];
+    await flushPromises();
+    const announcement = wrapper.find(
+      '[data-test="log-search-index-list-stream-picker-announcement"]',
+    );
+    expect(select().element.hasAttribute("data-o-tooltip-trigger")).toBe(true);
+    expect(announcement.attributes("data-o-tooltip-trigger")).toBeUndefined();
   });
 
   it("pins selected streams within their group in multi-select", () => {
