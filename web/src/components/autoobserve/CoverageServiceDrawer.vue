@@ -354,7 +354,7 @@ const props = defineProps<{
   serviceStates: Record<string, ServiceState>;
   scenario: Scenario;
   ledger: LedgerEntry[];
-  expanded: Signal | null;
+  expanded: Signal | LiveCheck | null;
   anchor: string;
   fix: I18nText | null;
   message: I18nText | "";
@@ -363,7 +363,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   close: [];
-  expand: [signal: Signal | null];
+  expand: [signal: Signal | LiveCheck | null];
   fix: [];
   select: [service: string];
 }>();
@@ -446,13 +446,12 @@ provide("hoveredSeriesState", hoveredSeriesState);
 const range = ref<ChartRange>("24h");
 const body = ref<HTMLElement | null>(null);
 const extraOpen = ref<string | null>(null);
-const absenceOpen = ref(false);
+const absenceOpen = computed(() => props.expanded === "absence");
 
 watch(
   () => props.row.service,
   () => {
     extraOpen.value = null;
-    absenceOpen.value = false;
     const scroller = body.value?.parentElement;
     if (scroller) scroller.scrollTop = 0;
   },
@@ -554,7 +553,7 @@ const liveChips = computed(() =>
     return {
       check,
       look: liveCellLook(stateKey),
-      open: check === "absence" ? absenceOpen.value : props.expanded === check,
+      open: props.expanded === check,
       text: liveCheckText(t, check, stateKey),
     };
   }),
@@ -583,8 +582,9 @@ const openSignal = (signal: Signal) => emit("expand", signal);
 
 const toggle = (signal: Signal) => emit("expand", props.expanded === signal ? null : signal);
 
+// Absence has no chart with its own Details toggle, so its chip toggles its detail open and shut.
 const openCheck = (check: LiveCheck) => {
-  if (check === "absence") absenceOpen.value = !absenceOpen.value;
+  if (check === "absence") emit("expand", props.expanded === "absence" ? null : "absence");
   else openSignal(check);
 };
 
