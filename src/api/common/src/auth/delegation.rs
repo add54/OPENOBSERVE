@@ -708,6 +708,7 @@ mod tests {
         );
         for reason in [
             DisabledReason::Edition,
+            DisabledReason::License,
             DisabledReason::Flag,
             DisabledReason::MasterKey,
             DisabledReason::SuperCluster,
@@ -715,6 +716,7 @@ mod tests {
             // A new reason must join this list: the match stops compiling until it does.
             match reason {
                 DisabledReason::Edition
+                | DisabledReason::License
                 | DisabledReason::Flag
                 | DisabledReason::MasterKey
                 | DisabledReason::SuperCluster => {}
