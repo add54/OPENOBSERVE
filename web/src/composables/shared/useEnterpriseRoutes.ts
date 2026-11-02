@@ -466,7 +466,7 @@ const useEnterpriseRoutes = () => {
         path: "edit",
         name: "workflowEditor",
         component: WorkflowEditor,
-        meta: { titleKey: "workflow.editMode" },
+        meta: { titleKey: "workflow.editMode", accessScopeQuery: ["id"] },
         beforeEnter: withFeatureGate("workflows", workflowsRouteGuard),
       },
       {
@@ -476,7 +476,7 @@ const useEnterpriseRoutes = () => {
         path: "runs",
         name: "workflowRuns",
         component: WorkflowRuns,
-        meta: { titleKey: "workflow.runs.title" },
+        meta: { titleKey: "workflow.runs.title", accessScopeQuery: ["id"] },
         beforeEnter: withFeatureGate("workflows", workflowsRouteGuard),
       },
     ],

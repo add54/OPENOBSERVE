@@ -147,6 +147,7 @@ const useManagementRoutes = () => {
     name: "modelPricingEditor",
     meta: {
       titleKey: "routeTitles.modelPricingEditor",
+      accessScopeQuery: ["id"],
     },
     component: () => import("@/components/settings/ModelPricingEditor.vue"),
     beforeEnter: withFeatureGate("modelPricing", routeGuard),
