@@ -6185,7 +6185,7 @@
       },
       "installOneClick": "新增至 {client}",
       "skillsLabel": "新增 {brand} 技能（選填）",
-      "skillsHint": "教導您的 AI 助手如何在 {brand} 中查詢、設定警示及建立儀表板，讓它能更充分利用 MCP 工具。在您的專案中執行它，然後選擇要安裝到的代理程式。",
+      "skillsHint": "教導您的 AI 助手如何在 {brand} 中查詢、設定警示及建立儀表板，讓它能更充分利用 MCP 工具。在您的專案中執行它，它會安裝到您電腦上找到的每個 AI 工具中。",
       "skillsRepo": "在 {host} 上檢視技能"
     },
     "manageTokensBtnLabel": "管理權杖",
@@ -9396,6 +9396,13 @@
     "rowFields": "列欄位",
     "valueFields": "值欄位",
     "noData": "無資料",
+    "previewView": "預覽檢視",
+    "previewChart": "圖表",
+    "previewData": "資料",
+    "showRawData": "顯示原始資料",
+    "showChart": "顯示圖表",
+    "dataViewEmpty": "未傳回任何資料列",
+    "dataViewCapped": "顯示 {total} 列中的前 {shown} 列",
     "logExplorer": {
       "title": "日誌瀏覽器",
       "openInLogs": "在日誌中開啟",
