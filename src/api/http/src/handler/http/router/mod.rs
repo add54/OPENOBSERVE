@@ -1548,7 +1548,8 @@ pub fn service_routes() -> Router {
             .route("/{org_id}/anomaly_detection/{config_id}/detect", post(anomaly_detection::detect_anomalies))
             .route("/{org_id}/anomaly_detection/{config_id}/history", get(anomaly_detection::get_detection_history))
             .route("/{org_id}/anomaly_detection/history", get(alerts::history::get_all_anomaly_history));
-        router = autoobserve_routes(alert_calibration_routes(router));
+        router = alert_calibration_routes(router);
+        router = autoobserve_routes(router);
     }
 
     router = router
