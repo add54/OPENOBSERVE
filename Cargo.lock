@@ -8236,6 +8236,7 @@ dependencies = [
  "svix-ksuid",
  "time",
  "tokio",
+ "tower",
  "tracing",
  "transform",
  "url",

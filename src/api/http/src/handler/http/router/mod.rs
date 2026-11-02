@@ -31,10 +31,10 @@ use openobserve_api_management::request::org_domains;
 #[cfg(feature = "cpu-profiling")]
 use openobserve_api_management::request::profiling;
 use openobserve_api_management::request::{
-    alerts, announcements, authz, dashboards, db_monitoring, downtimes, folders, ingest_rejections,
-    kv, metrics_usage, model_pricing, organization, public_dashboards, query_history,
-    rum_analytics, service_accounts, short_url, slack, slos, sourcemaps, status, status_pages,
-    stream, synthetics, users,
+    alerts, announcements, authz, autoobserve, dashboards, db_monitoring, downtimes, folders,
+    ingest_rejections, kv, metrics_usage, model_pricing, organization, public_dashboards,
+    query_history, rum_analytics, service_accounts, short_url, slack, slos, sourcemaps, status,
+    status_pages, stream, synthetics, users,
 };
 #[cfg(feature = "cloud")]
 use openobserve_api_management::request::{cloud, organization::billing_group};
@@ -1172,6 +1172,18 @@ fn alert_calibration_routes(router: Router) -> Router {
         .route("/v2/{org_id}/alert_calibration/digests/run", post(alert_calibration::digests::run_alert_calibration))
 }
 
+// Registered in every build: without enterprise each handler answers Not Supported.
+#[rustfmt::skip]
+fn autoobserve_routes(router: Router) -> Router {
+    router
+        .route("/v2/{org_id}/autoobserve/entity_types", get(autoobserve::entity_types))
+        .route("/v2/{org_id}/autoobserve/coverage", get(autoobserve::coverage))
+        .route("/v2/{org_id}/autoobserve/coverage/history", get(autoobserve::coverage_history))
+        .route("/v2/{org_id}/autoobserve/suggestions", get(autoobserve::suggestions))
+        .route("/v2/{org_id}/autoobserve/marks", get(autoobserve::list_marks))
+        .route("/v2/{org_id}/autoobserve/marks/{mark}/{entity_type}/{entity_id}", put(autoobserve::put_mark).delete(autoobserve::delete_mark))
+}
+
 #[rustfmt::skip]
 pub fn service_routes() -> Router {
     let cfg = get_config();
@@ -1186,9 +1198,9 @@ pub fn service_routes() -> Router {
     #[cfg(not(feature = "enterprise"))]
     let server = cfg.common.instance_name_short.to_string();
 
-    // Downtimes and Slack live in their own tables to keep this function under the line limit.
+    // Downtimes, Slack and AutoObserve live in their own tables to keep this function under the line limit.
     let mut router =
-        public_dashboard_admin_routes(Router::new().merge(downtime_routes()).merge(slack_routes()));
+        public_dashboard_admin_routes(autoobserve_routes(Router::new().merge(downtime_routes()).merge(slack_routes())));
     // Full UI configuration — authenticated counterpart of the unauthenticated
     // `/config` bootstrap in config_routes()
     router = router.route("/{org_id}/config", get(status::zo_config));
