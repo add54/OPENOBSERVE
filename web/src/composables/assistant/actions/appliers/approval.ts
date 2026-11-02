@@ -15,6 +15,9 @@
 
 import { CONFIRM_TIMEOUT_MS, type ConfirmBody, type ConfirmResponse } from "@/services/assistant";
 
+import type { ChatMessage } from "@/ts/interfaces/chat";
+
+import { approvalName, approvalToolEntity } from "../../approvalAnatomy";
 import { ERROR_LEDGER } from "../../assistantErrors";
 import type {
   ActionLedgerEntry,
@@ -22,12 +25,13 @@ import type {
   ApprovalOutcome,
   ApprovalResult,
   ApprovalResultItem,
+  ApprovalTarget,
   AssistantError,
   AssistantSession,
   PendingApproval,
   Sid,
 } from "../../assistantStore.types";
-import { isDeleteCard, type ApprovalBlockData } from "../../reducer";
+import { isDeleteCard, type ApprovalBlockData, type ResolvedBlockData } from "../../reducer";
 import { registerApplier, type ActionEnv } from "../registry";
 import type { ActionResult, AssistantAction } from "../types";
 
@@ -72,6 +76,8 @@ const OP_OF_KIND: Record<PendingApproval["kind"], ActionLedgerEntry["op"]> = {
   permission: "run_command",
   question: "run_command",
 };
+
+const RECORDED_WRITES: ReadonlySet<string> = new Set(["create", "update", "delete"]);
 
 /** What a decision came to: the record's state and, for an approve answered item by item, its rows. */
 export interface ApprovalDetail {
@@ -140,11 +146,47 @@ export function approvalResultOf(
   resolvedBy: string,
   resolvedAt: number,
 ): ApprovalResult | null {
-  if (!Array.isArray(response.results) || response.results.length === 0) return null;
-  const items = response.results.slice(0, MAX_RESULT_ITEMS).map((raw) => itemOf(raw, card));
+  const rows = rowsOf(response);
+  if (!rows?.length) return null;
+  const items = rows.slice(0, MAX_RESULT_ITEMS).map((raw) => itemOf(raw, card));
   const done = items.filter((item) => item.status === "done").length;
   const status = done === items.length ? "done" : done === 0 ? "failed" : "partial";
   return { status, items, resolvedBy, resolvedAt };
+}
+
+/** The timeline rows a reopened chat's approved writes stand for when this browser kept none; without the server's ledger id they offer no Undo. */
+export function recordedLedger(
+  messages: readonly ChatMessage[],
+  ledger: readonly ActionLedgerEntry[],
+): ActionLedgerEntry[] {
+  const known = new Set(ledger.map((entry) => entry.approvalId));
+  return messages.flatMap((message) => {
+    const blocks = message.contentBlocks ?? [];
+    return blocks.flatMap((block) => {
+      const card = block.approval;
+      if (!card || known.has(card.id) || !RECORDED_WRITES.has(card.kind)) return [];
+      const at = approvedAt(card, blocks.find((b) => b.resolved?.id === card.id)?.resolved);
+      if (at === undefined) return [];
+      const targets: ApprovalTarget[] = card.targets?.length
+        ? card.targets
+        : [{ type: "", name: approvalName(card) ?? "" }];
+      return targets.map<ActionLedgerEntry>((target, index) => ({
+        id: `${card.id}:${index}`,
+        approvalId: card.id,
+        turnId: message.turnId ?? "",
+        tool: card.tool,
+        op: OP_OF_KIND[card.kind],
+        resource: {
+          type: target.type || approvalToolEntity(card) || "object",
+          name: target.name,
+          ...(target.id && { id: target.id }),
+        },
+        status: "done",
+        undoable: false,
+        at,
+      }));
+    });
+  });
 }
 
 async function approvalApplier(
@@ -217,7 +259,7 @@ function detailOf(
     return { outcome: { state: DENIED_STATE[decision.reason], at, decision: kept } };
   }
   // A refusal of the server's own is never a success, and an answer with no rows confirms nothing.
-  const rows = response.results;
+  const rows = rowsOf(response);
   const said = response.resolved?.outcome;
   const reason =
     said && said !== "approved" ? text(response.resolved?.detail).slice(0, MAX_MESSAGE_CHARS) : "";
@@ -237,6 +279,15 @@ function detailOf(
     return { outcome: { state: "unconfirmed", at, decision } };
   const state = result ? result.status : said === "partial" ? "partial" : "approved";
   return { outcome: { state, at, decision, ...(reason && { reason }) }, ...(result && { result }) };
+}
+
+// The per-item rows, under `results` from older servers and `items` from newer ones; both carry the ledger id.
+function rowsOf(response: ConfirmResponse): unknown[] | undefined {
+  if (Array.isArray(response.results)) return response.results;
+  const items = Array.isArray(response.items) ? response.items : [];
+  return items.length && items.every((item) => typeof item === "object" && item !== null)
+    ? items
+    : undefined;
 }
 
 function itemOf(raw: unknown, card: Pick<ApprovalBlockData, "targets">): ApprovalResultItem {
@@ -285,6 +336,23 @@ function appendLedger(
     -MAX_LEDGER,
   );
   return entries;
+}
+
+// When a replayed card's approve took effect: its stored resolution, else the server's approval row.
+function approvedAt(
+  card: ApprovalBlockData,
+  resolved: ResolvedBlockData | null | undefined,
+): number | undefined {
+  if (resolved) {
+    const applied =
+      resolved.recorded &&
+      resolved.approved &&
+      !resolved.expired &&
+      !resolved.withdrawn &&
+      (resolved.outcome === undefined || resolved.outcome === "approved");
+    return applied ? (resolved.at ?? card.recorded?.at) : undefined;
+  }
+  return card.recorded?.status === "approved" ? card.recorded.at : undefined;
 }
 
 // 404 is "no pending confirmation": the replica restarted or the server's TTL already declined it.

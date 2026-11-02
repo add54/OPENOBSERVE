@@ -93,6 +93,7 @@ import type { IconName } from "@/lib/core/Icon/OIcon.types";
 import { raw, useI18nTyped } from "@/types/i18n";
 import { formatOrgTime } from "@/utils/formatters";
 
+import { readableReason } from "./approvalText";
 import AssistantUndoControl from "./AssistantUndoControl.vue";
 
 const props = withDefaults(
@@ -131,7 +132,9 @@ const rows = computed(() =>
     const text = failed
       ? t("assistant.actions.failedEntry", {
           name,
-          reason: entry.reason ? raw(entry.reason) : t("assistant.approval.reason.unknown"),
+          reason: entry.reason
+            ? readableReason(entry.reason, t)
+            : t("assistant.approval.reason.unknown"),
           time,
         })
       : t("assistant.actions.entry", {

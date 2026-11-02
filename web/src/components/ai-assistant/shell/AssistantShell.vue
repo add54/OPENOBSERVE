@@ -771,6 +771,7 @@ import {
   assistantEvidenceHostKey,
   assistantSessionSourceKey,
   assistantTranscriptHostKey,
+  recordedLedger,
   type AssistantEvidenceHost,
   type AssistantTranscriptHost,
 } from "@/composables/assistant/pure";
@@ -1199,7 +1200,10 @@ const decisions = computed(() => {
       block.policy?.kind === "unreviewed" ? [block.policy] : [],
     ),
   );
-  return { sid: current.sid, org: current.org, ledger: current.ledger, unreviewed };
+  const ledger = [...current.ledger, ...recordedLedger(current.messages, current.ledger)].sort(
+    (a, b) => a.at - b.at,
+  );
+  return { sid: current.sid, org: current.org, ledger, unreviewed };
 });
 
 const approvalCard = computed<ApprovalCardView | null>(() => {

@@ -1813,7 +1813,7 @@ async fn relay_confirm_answer(answered: &Answered<'_>, response_body: &str) -> R
         super::grants::record_from_confirm(org_id, session_id, caller, resolved, tool).await;
         let rows =
             super::activity::record_confirm(org_id, session_id, caller, request, &answer).await;
-        super::activity::with_ledger_ids(&mut answer, &rows);
+        super::activity::with_ledger_ids(&mut answer, &rows, config::utils::time::now_micros());
         // The chat index stops reporting the confirmation as pending.
         super::turn_marks::mark_answered(org_id, session_id, caller).await;
         record_turn_decision(org_id, session_id, caller, request).await;

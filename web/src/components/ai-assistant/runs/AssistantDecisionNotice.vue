@@ -21,7 +21,13 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
       :aria-label="t('assistant.notice.region', { product })"
       data-assistant-surface
       data-dd-privacy="mask"
-      class="bg-surface-overlay rounded-surface fixed end-4 bottom-[calc(var(--o-assistant-inset-bottom,0rem)+1rem)] z-5000 flex w-[min(20rem,calc(100vw-2rem))] flex-col gap-2 border border-transparent p-3 shadow-lg"
+      ref="panel"
+      :class="[
+        'bg-surface-overlay rounded-surface fixed bottom-[calc(var(--o-assistant-inset-bottom,0)*0.0625rem+1rem)] z-5000 flex w-[min(20rem,calc(100vw-2rem))] flex-col gap-2 border border-transparent p-3 shadow-lg',
+        side === 'start' ? 'start-4' : 'end-[calc(var(--o-notice-end,0)*0.0625rem+1rem)]',
+      ]"
+      :style="{ '--o-notice-end': String(drawerInsetEnd) }"
+      :data-side="side"
       data-test="assistant-decision-notice"
     >
       <div class="flex min-w-0 flex-col gap-0.5">
@@ -105,6 +111,7 @@ import {
 import useBreakpoint from "@/composables/useBreakpoint";
 import OButton from "@/lib/core/Button/OButton.vue";
 import OText from "@/lib/core/Typography/OText.vue";
+import { drawerInsetEnd } from "@/lib/overlay/Drawer/drawerInset";
 import { raw, useI18nTyped, type I18nText } from "@/types/i18n";
 
 import { runRequest, runTitle } from "./runsText";
@@ -117,6 +124,9 @@ const SPEAK_GAP_MS = 3_000;
 const WARN_FIRST_MS = 60_000;
 
 const WARN_LAST_MS = 20_000;
+
+// Unitless px, written by the tray band and the phone sheet.
+const INSET_VAR = "--o-assistant-inset-bottom";
 
 const SHARED_ROUTES: ReadonlySet<unknown> = new Set(["sharedChat", "publicSharedChat"]);
 
@@ -136,6 +146,8 @@ const vuex = useStore();
 const { lgUp } = useBreakpoint();
 const now = ref(Date.now());
 const modalOpen = ref(false);
+const panel = ref<HTMLElement | null>(null);
+const windowAtEnd = ref(false);
 const hiddenRequests = ref(new Set<string>());
 const warning = ref(new Set<string>());
 const warnedWindows = new Set<string>();
@@ -172,6 +184,10 @@ const line = computed<I18nText | null>(() => {
     ? t("assistant.notice.decisionMany", { n: count })
     : t("assistant.notice.decision");
 });
+// The page area ends at the sidebar, and the full view and a focused window in the end corner push it to the start.
+const side = computed<"start" | "end">(() =>
+  route?.name === "assistant" || windowAtEnd.value ? "start" : "end",
+);
 const ask = computed(() => (subject.value ? runRequest(subject.value, t) : null));
 // The time joins the request at the warnings, in amber; the bare clock stays on the card.
 const clock = computed<string | null>(() => {
@@ -223,9 +239,29 @@ function checkWarning(row: RunRow): void {
   speak(warningLine(row, left));
 }
 
+// A focused window never moves, so the notice yields the end corner while that window holds it.
+function focusedWindowAtEnd(): boolean {
+  const focused = store.state.shell.lastFocusedContainer;
+  const el = panel.value;
+  if (!focused || focused === "sidebar" || !el) return false;
+  const win = Array.from(document.querySelectorAll<HTMLElement>("[data-assistant-window]"))
+    .find((node) => node.dataset.assistantWindow === focused.window)
+    ?.getBoundingClientRect();
+  if (!win) return false;
+  const root = getComputedStyle(document.documentElement);
+  const gap = 16 + drawerInsetEnd.value;
+  const { offsetWidth: width, offsetHeight: height } = el;
+  const left = root.direction === "rtl" ? gap : window.innerWidth - gap - width;
+  const bottom = window.innerHeight - 16 - (Number(root.getPropertyValue(INSET_VAR)) || 0);
+  return (
+    win.left < left + width && win.right > left && win.top < bottom && win.bottom > bottom - height
+  );
+}
+
 function tick(): void {
   now.value = Date.now();
   modalOpen.value = !!document.querySelector('[data-o2-dialog][data-state="open"]');
+  windowAtEnd.value = focusedWindowAtEnd();
   decisions.value.forEach(checkWarning);
 }
 

@@ -1974,6 +1974,15 @@ export default defineComponent({
       forecastHorizon.value = detail.forecastHorizon ?? null;
     };
 
+    // The picker takes a millisecond URL range only on mount; a range applied in place must be microseconds.
+    const rangeInMicros = (date: SelectedDate): SelectedDate => {
+      const micros = (v: SelectedDate["startTime"]) =>
+        v != null && /^\d{1,13}$/.test(String(v)) ? String(Number(v) * 1000) : v;
+      return date.valueType === "absolute"
+        ? { ...date, startTime: micros(date.startTime), endTime: micros(date.endTime) }
+        : date;
+    };
+
     // URL -> state, for the navigations the mount-time apply cannot see:
     // clicking sidebar "Metrics" while filtered (a bare URL must CLEAR the
     // filters), and back/forward between two /metrics?… entries. Unlike the
@@ -2064,7 +2073,9 @@ export default defineComponent({
       if (f.labelFilters?.length) grid.ensureSchemas();
 
       const nextDate =
-        q.period || (q.from && q.to) ? queryParamsToSelectedDate(q) : defaultSelectedDate();
+        q.period || (q.from && q.to)
+          ? rangeInMicros(queryParamsToSelectedDate(q))
+          : defaultSelectedDate();
       if (
         !isEqual(selectedDateToQueryParams(nextDate), selectedDateToQueryParams(selectedDate.value))
       ) {
@@ -2140,6 +2151,8 @@ export default defineComponent({
       if (refreshing.value) return;
 
       syncTimeRange();
+      // Under Visualize the grid is off screen; it re-queries the new window once back, never as a link lands.
+      if (mode.value === "visualize") return;
       // A deliberate change of window must reach the backend — repainting the
       // persisted result would hand the user back the data they just moved away
       // from.

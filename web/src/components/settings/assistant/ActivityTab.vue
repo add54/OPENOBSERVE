@@ -88,15 +88,15 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
         <OTruncatedText class="block">{{ raw(row.action) }}</OTruncatedText>
       </template>
       <template #cell-target="{ row }">
-        <template v-if="row.target?.name">
-          <s v-if="row.target.deleted" class="text-text-body">{{ row.target.name }}</s>
+        <template v-if="targetName(row)">
+          <s v-if="row.target?.deleted" class="text-text-body">{{ targetName(row) }}</s>
           <router-link
-            v-else-if="safeLink(row.target.link)"
+            v-else-if="safeLink(row.target?.link)"
             class="text-text-link-hover underline hover:no-underline"
-            :to="safeLink(row.target.link)!"
-            >{{ row.target.name }}</router-link
+            :to="safeLink(row.target?.link)!"
+            >{{ targetName(row) }}</router-link
           >
-          <span v-else>{{ row.target.name }}</span>
+          <span v-else>{{ targetName(row) }}</span>
         </template>
         <span v-else class="text-text-secondary">{{ raw("—") }}</span>
       </template>
@@ -110,7 +110,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
         <div class="flex flex-wrap items-center gap-1">
           <OTag
             v-if="row.result"
-            :variant="row.result.state === 'failed' ? 'warning-soft' : 'default-soft'"
+            :variant="resultState(row) === 'failed' ? 'warning-soft' : 'default-soft'"
             :label="resultLabel(row)"
             :data-test="`settings-assistant-activity-${row.id}-result`"
           />
@@ -119,7 +119,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
       <template #cell-actions="{ row }">
         <div class="flex items-center justify-end gap-1">
           <OButton
-            v-if="row.undo.available && row.result?.state !== 'undone'"
+            v-if="row.undo.available && resultState(row) !== 'undone'"
             variant="ghost"
             size="sm"
             class="max-md:min-h-11"
@@ -225,6 +225,8 @@ const filter = computed(() => ({
 const activity = useQuery(computed(() => assistantActivityQuery(page.org.value, filter.value)));
 const undoMutation = useMutation(() => undoActivityMutation(page.org.value));
 const undoing = ref<string | null>(null);
+// The server may answer the refetch before it marks the row, so an Undo made here reads as done at once.
+const undone = ref(new Set<string>());
 
 const state = computed(() => readStateOf(activity));
 const rows = computed(() => activity.data.value?.rows ?? []);
@@ -296,10 +298,20 @@ function approvalLabel(row: AssistantActivityEntry) {
   return t("assistant.activity.noApproval");
 }
 
+// A row whose server name is missing still names its object by id rather than a dash.
+function targetName(row: AssistantActivityEntry): string {
+  return row.target?.name || row.target?.id || "";
+}
+
+function resultState(row: AssistantActivityEntry) {
+  return undone.value.has(row.id) ? "undone" : row.result?.state;
+}
+
 function resultLabel(row: AssistantActivityEntry) {
   const result = row.result!;
-  if (result.state === "done") return t("assistant.activity.done");
-  if (result.state === "undone") return t("assistant.activity.undoneState");
+  const state = resultState(row);
+  if (state === "done") return t("assistant.activity.done");
+  if (state === "undone") return t("assistant.activity.undoneState");
   return result.message
     ? t("assistant.activity.failed", { cause: result.message })
     : t("assistant.activity.failedPlain");
@@ -352,6 +364,8 @@ async function undo(row: AssistantActivityEntry) {
   undoing.value = row.id;
   try {
     await undoMutation.mutateAsync(row.id);
+    undone.value = new Set(undone.value).add(row.id);
+    void refresh();
     toast({
       variant: "success",
       message: t("assistant.activity.undoDone", { action: row.action }),

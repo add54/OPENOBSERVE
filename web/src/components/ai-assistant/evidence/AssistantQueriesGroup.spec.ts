@@ -69,8 +69,9 @@ describe("AssistantQueriesGroup", () => {
     props: Record<string, unknown> = {},
     annotate?: (evidence: ReturnType<typeof fakeEvidence>) => void,
     turn: Record<string, unknown> = {},
+    isAdmin?: boolean,
   ) => {
-    const evidence = fakeEvidence();
+    const evidence = fakeEvidence({ isAdmin });
     annotate?.(evidence);
     const wrapper = mount(AssistantQueriesGroup, {
       props: { message: message(blocks), turn: evidence.turn(turn), ...props },
@@ -157,5 +158,14 @@ describe("AssistantQueriesGroup", () => {
     const hidden = mountGroup([query("a", "default")], {}, undefined, { hiddenByOwner: true });
     expect(hidden.wrapper.find('[data-test="assistant-trail-hidden"]').exists()).toBe(true);
     expect(hidden.wrapper.find('[data-test="assistant-queries-line"]').exists()).toBe(false);
+  });
+
+  it("offers Ask an admin to a member, never to an admin", () => {
+    const member = mountGroup([query("a", "app_logs")], { unavailable: 1 }, undefined, {}, false);
+    const line = (wrapper: typeof member.wrapper) =>
+      wrapper.get('[data-test="assistant-queries-no-access"]').text();
+    expect(line(member.wrapper)).toContain("·");
+    const admin = mountGroup([query("a", "app_logs")], { unavailable: 1 });
+    expect(line(admin.wrapper)).toBe("1 citation unavailable: no access to app_logs");
   });
 });

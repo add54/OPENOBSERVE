@@ -344,6 +344,21 @@ describe("AssistantApprovalResult", () => {
     expect(line(wrapper)).toMatch(/^Approved in another tab · /);
   });
 
+  it("reads a reopened chat's own decision as its normal record, never another tab's", () => {
+    const reopened = (resolved: Record<string, unknown>) =>
+      mountRecord(null, {
+        blocks: [
+          block,
+          { type: "approval_result", resolved: { id: "c9", recorded: true, ...resolved } },
+        ],
+      }).wrapper;
+    const approved = reopened({ approved: true, at: 1_760_000_000_000 });
+    expect(line(approved)).toBe("Deleted 2 alerts");
+    expect(approved.text()).not.toContain("another tab");
+    expect(approved.find('[data-test="assistant-approval-result-meta"]').text()).toMatch(/^you · /);
+    expect(line(reopened({ approved: false, at: 1 }))).toBe("Denied: delete 2 alerts");
+  });
+
   it("keeps the record of a Deny made here when its confirmation_resolved follows", () => {
     const resolved: ContentBlock = {
       type: "approval_result",
@@ -370,6 +385,33 @@ describe("AssistantApprovalResult", () => {
     const { wrapper } = mountRecord(null, { blocks: [block, resolved] });
     expect(line(wrapper)).toBe(
       "Nothing was changed. OpenObserve did not accept the assistant's approval for this change.",
+    );
+  });
+
+  it("words a refused call's raw HTTP error, never its JSON body", () => {
+    const refused = (message: string, code?: string) =>
+      mountRecord({
+        outcome: { state: "failed", at: 1 },
+        result: {
+          status: "failed",
+          items: [
+            { type: "alert", name: "mute1", status: "failed", message, ...(code && { code }) },
+          ],
+          resolvedBy: "ada@example.com",
+          resolvedAt: 1,
+        },
+      }).wrapper;
+    const conflict = refused('Error 409: {"code":"already_muted","downtime_id":"d1","until":1}');
+    expect(line(conflict)).toBe(
+      "Nothing was changed. It already exists or is already in that state",
+    );
+    expect(conflict.text()).not.toContain("{");
+    expect(line(refused('Error 400: {"detail":{"message":"Duration is too long"}}'))).toBe(
+      "Nothing was changed. Duration is too long",
+    );
+    expect(line(refused("Error 418: {}"))).toBe("Nothing was changed. error 418");
+    expect(line(refused("whatever", "409"))).toBe(
+      "Nothing was changed. It already exists or is already in that state",
     );
   });
 

@@ -144,7 +144,6 @@ pub struct ChatSummary {
     pub active_turn: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_turn_id: Option<String>,
-    /// A hint: the chat waits on a request or approval card the caller has not answered.
     pub pending_approval: bool,
     /// The call id of that request, when it could be read.
     #[serde(skip_serializing_if = "Option::is_none")]

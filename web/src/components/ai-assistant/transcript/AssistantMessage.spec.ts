@@ -356,6 +356,25 @@ describe("AssistantMessage", () => {
       );
     });
 
+    it("never counts a cited write behind its card as a citation an admin must unlock", async () => {
+      const wrapper = mountLive([
+        ...steps,
+        { type: "tool_call", tool: "o2_alert_mute", call_id: "call_9", pendingConfirmation: true },
+        { type: "text", text: "Paused it [^call_9], checked [^call_1], lost [^call_7]." },
+      ]);
+      await flushPromises();
+      expect(wrapper.get('[data-test="assistant-queries-no-access"]').text()).toMatch(
+        /^1 citation unavailable/,
+      );
+      const plain = mountLive([
+        ...steps,
+        { type: "tool_call", tool: "o2_alert_mute", call_id: "call_9", pendingConfirmation: true },
+        { type: "text", text: "Paused it [^call_9], checked [^call_1]." },
+      ]);
+      await flushPromises();
+      expect(plain.find('[data-test="assistant-queries-no-access"]').exists()).toBe(false);
+    });
+
     it("turns a navigation frame into one link card, deduped against the same Markdown link", () => {
       const wrapper = mountLive([
         {

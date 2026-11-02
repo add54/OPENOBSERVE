@@ -191,7 +191,7 @@ import type { ChatMessage, ContentBlock } from "@/ts/interfaces/chat";
 import { raw, useI18nTyped, type I18nText } from "@/types/i18n";
 import { formatOrgTime } from "@/utils/formatters";
 
-import { lowerFirst } from "./approvalText";
+import { lowerFirst, readableReason, statusReason } from "./approvalText";
 import {
   assistantApprovalsHostKey,
   type ApprovalCardView,
@@ -508,14 +508,16 @@ function approvalOf(id: string | undefined): ApprovalBlockData | null {
   return null;
 }
 
-// An approval the server could not carry out changed nothing, wherever it was given.
+// An approval the server could not carry out changed nothing, wherever it was given; a reopened chat's decision is its own.
 function resolvedState(
   block: ResolvedBlockData,
-): "expired" | "withdrawn" | "approved_elsewhere" | "declined_elsewhere" | "answered" | "failed" {
+): Exclude<ApprovalResultState, "waiting_elsewhere"> {
   if (block.expired) return "expired";
   if (block.withdrawn) return "withdrawn";
   if (block.answer !== undefined) return "answered";
   if (block.approved && (block.outcome === "failed" || block.outcome === "denied")) return "failed";
+  if (block.recorded && block.approved) return block.outcome === "partial" ? "approved" : "done";
+  if (block.recorded) return "declined";
   return block.approved ? "approved_elsewhere" : "declined_elsewhere";
 }
 
@@ -603,13 +605,13 @@ function failedReason(): I18nText {
   if (status === 412) return t("assistant.approval.result.failedConsent");
   const first = view.value?.result?.items.find((item) => item.status !== "done");
   if (first) return itemReason(first);
-  return view.value?.outcome?.reason ? raw(view.value.outcome.reason) : raw("");
+  return view.value?.outcome?.reason ? readableReason(view.value.outcome.reason, t) : raw("");
 }
 
 function itemReason(item: ApprovalResultItem): I18nText {
-  if (item.code === "403") return t("assistant.approval.reason.forbidden");
-  if (item.code === "404") return t("assistant.approval.reason.notFound");
-  if (item.message) return raw(item.message);
+  const known = item.code ? statusReason(Number(item.code), t) : null;
+  if (known) return known;
+  if (item.message) return readableReason(item.message, t);
   if (item.code) return t("assistant.approval.reason.status", { code: raw(item.code) });
   return t("assistant.approval.reason.unknown");
 }

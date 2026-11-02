@@ -28,6 +28,7 @@ import {
   approvalResultOf,
   canAlwaysAllow,
   confirmBodyOf,
+  recordedLedger,
   registerApprovalAppliers,
 } from "./approval";
 
@@ -205,6 +206,64 @@ describe("approval applier", () => {
       ["c9:1", "delete", false],
     ]);
     expect(session.annotations[approvalAnnotationKey("c9")].ledger).toHaveLength(2);
+  });
+
+  it("binds Undo from the `items` rows a newer server answers with, and ignores bare item ids", async () => {
+    const { sid, env, session, dispatcher } = withCard();
+    env.confirm.mockResolvedValueOnce({
+      items: [
+        {
+          name: "checkout-latency-old",
+          type: "alert",
+          status: "done",
+          ledger_id: "led-7",
+          undoable: true,
+        },
+        {
+          name: "payments-5xx-staging",
+          type: "alert",
+          status: "done",
+          undoable: false,
+          undo_reason: "unsupported",
+        },
+      ],
+    });
+    await dispatcher.approvals(sid, {
+      kind: "approval",
+      approvalId: "c9",
+      decision: { approved: true, scope: "once" },
+    });
+    expect(session.ledger.map((entry) => [entry.id, entry.undoable])).toEqual([
+      ["led-7", true],
+      ["c9:1", false],
+    ]);
+
+    expect(approvalResultOf({ targets: [] }, { items: ["a1"] }, "a@b.c", 1)).toBeNull();
+  });
+
+  it("rebuilds a reopened chat's approved writes as timeline rows, never for a refusal or one kept here", () => {
+    const card = approvalOf(BATCH);
+    const reopened = (resolved: Record<string, unknown>): ChatMessage[] => [
+      {
+        role: "assistant",
+        content: raw(""),
+        turnId: "t1",
+        contentBlocks: [
+          { type: "approval", approval: card },
+          { type: "approval_result", resolved: { id: "c9", recorded: true, ...resolved } as any },
+        ],
+      },
+    ];
+    const rows = recordedLedger(reopened({ approved: true, at: 60_000 }), []);
+    expect(rows.map((row) => [row.id, row.op, row.resource.name, row.undoable, row.at])).toEqual([
+      ["c9:0", "delete", "checkout-latency-old", false, 60_000],
+      ["c9:1", "delete", "payments-5xx-staging", false, 60_000],
+    ]);
+    expect(recordedLedger(reopened({ approved: true, at: 1, outcome: "failed" }), [])).toEqual([]);
+    expect(recordedLedger(reopened({ approved: false, at: 1 }), [])).toEqual([]);
+    expect(
+      recordedLedger(reopened({ approved: true, at: 1 }), [{ ...rows[0], id: "led-1" }]),
+    ).toEqual([]);
   });
 
   it("never shows a success for an approve the server refused or answered with no rows", async () => {

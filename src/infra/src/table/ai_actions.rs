@@ -50,6 +50,14 @@ pub struct ListQuery {
     pub limit: u64,
 }
 
+/// The object one `/confirm` item names; a create's card has no id yet.
+#[derive(Debug, Clone, Copy)]
+pub struct ConfirmedTarget<'a> {
+    pub resource_type: &'a str,
+    pub resource_id: Option<&'a str>,
+    pub resource_name: Option<&'a str>,
+}
+
 fn db_err(e: impl ToString) -> errors::Error {
     errors::DbError::SeaORMError(e.to_string()).into()
 }
@@ -338,7 +346,7 @@ pub async fn stamp_approval_with<C: ConnectionTrait>(
 pub async fn stamp_execution(
     org_id: &str,
     session_id: &str,
-    target: (&str, &str),
+    target: ConfirmedTarget<'_>,
     approval: (&str, &str),
 ) -> Result<Option<Model>, errors::Error> {
     stamp_execution_with(
@@ -355,16 +363,19 @@ pub async fn stamp_execution_with<C: ConnectionTrait>(
     conn: &C,
     org_id: &str,
     session_id: &str,
-    (resource_type, resource_id): (&str, &str),
+    target: ConfirmedTarget<'_>,
     (approval_id, approved_by): (&str, &str),
 ) -> Result<Option<Model>, errors::Error> {
-    let Some(row) = Entity::find()
+    let mut find = Entity::find()
         .filter(Column::OrgId.eq(org_id))
         .filter(Column::SessionId.eq(session_id))
-        .filter(Column::ResourceType.eq(resource_type))
-        .filter(Column::ResourceId.eq(resource_id))
+        .filter(Column::ResourceType.eq(target.resource_type))
         .filter(Column::ApprovalId.eq(fit(approval_id, 128)))
-        .filter(Column::UndoOf.is_null())
+        .filter(Column::UndoOf.is_null());
+    if let Some(resource_id) = target.resource_id {
+        find = find.filter(Column::ResourceId.eq(resource_id));
+    }
+    let Some(mut row) = find
         .order_by_desc(Column::CreatedAt)
         .one(conn)
         .await
@@ -372,13 +383,23 @@ pub async fn stamp_execution_with<C: ConnectionTrait>(
     else {
         return Ok(None);
     };
-    Entity::update_many()
+    let mut update = Entity::update_many()
         .col_expr(Column::ApprovalKind, Expr::value(APPROVAL_APPROVED))
-        .col_expr(Column::ApprovedBy, Expr::value(fit(approved_by, 256)))
+        .col_expr(Column::ApprovedBy, Expr::value(fit(approved_by, 256)));
+    // A call such as a mute names no object in its body, so the card's target names the row.
+    let name = target.resource_name.filter(|name| !name.is_empty());
+    if let (None, Some(name)) = (&row.resource_name, name) {
+        let name = fit(name, 256);
+        update = update.col_expr(Column::ResourceName, Expr::value(name.clone()));
+        row.resource_name = Some(name);
+    }
+    update
         .filter(Column::Id.eq(row.id.clone()))
         .exec(conn)
         .await
         .map_err(db_err)?;
+    row.approval_kind = APPROVAL_APPROVED.to_string();
+    row.approved_by = Some(fit(approved_by, 256));
     Ok(Some(row))
 }
 
@@ -511,7 +532,11 @@ mod tests {
             ..action("a@x", 2)
         };
         let granted = insert_with(&db, granted).await.unwrap();
-        let target = ("alert", "a1");
+        let target = ConfirmedTarget {
+            resource_type: "alert",
+            resource_id: Some("a1"),
+            resource_name: None,
+        };
         let late = stamp_execution_with(&db, "o", "s", target, ("ap1", "a@x"))
             .await
             .unwrap();
@@ -534,6 +559,59 @@ mod tests {
             let other = get_with(&db, "o", &other.id).await.unwrap().unwrap();
             assert_eq!(other.approval_kind, APPROVAL_NONE);
         }
+    }
+
+    #[tokio::test]
+    async fn a_card_without_an_id_stamps_its_create_by_approval_and_names_an_unnamed_row() {
+        let db = db().await;
+        let created = Model {
+            approval_id: Some("ap1".to_string()),
+            op: OP_CREATE.to_string(),
+            resource_id: Some("new-id".to_string()),
+            ..action("a@x", 1)
+        };
+        let created = insert_with(&db, created).await.unwrap();
+        let muted = Model {
+            approval_id: Some("ap2".to_string()),
+            op: OP_OTHER.to_string(),
+            resource_name: None,
+            ..action("a@x", 2)
+        };
+        let muted = insert_with(&db, muted).await.unwrap();
+        let card = |name| ConfirmedTarget {
+            resource_type: "alert",
+            resource_id: None,
+            resource_name: Some(name),
+        };
+        let stamped = stamp_execution_with(&db, "o", "s", card("renamed"), ("ap1", "a@x"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(stamped.id, created.id);
+        assert_eq!(stamped.approval_kind, APPROVAL_APPROVED);
+        assert_eq!(stamped.resource_name.as_deref(), Some("cpu"));
+        let stored = get_with(&db, "o", &created.id).await.unwrap().unwrap();
+        assert_eq!(
+            (stored.approval_kind.as_str(), stored.approved_by.as_deref()),
+            (APPROVAL_APPROVED, Some("a@x"))
+        );
+        assert_eq!(stored.resource_name.as_deref(), Some("cpu"));
+
+        let stamped = stamp_execution_with(&db, "o", "s", card("e2e-mute"), ("ap2", "a@x"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(stamped.resource_name.as_deref(), Some("e2e-mute"));
+        let stored = get_with(&db, "o", &muted.id).await.unwrap().unwrap();
+        assert_eq!(stored.resource_name.as_deref(), Some("e2e-mute"));
+        let elsewhere = ConfirmedTarget {
+            resource_type: "dashboard",
+            ..card("x")
+        };
+        let none = stamp_execution_with(&db, "o", "s", elsewhere, ("ap1", "a@x"))
+            .await
+            .unwrap();
+        assert!(none.is_none());
     }
 
     #[tokio::test]

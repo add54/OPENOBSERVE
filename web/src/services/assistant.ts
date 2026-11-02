@@ -99,6 +99,8 @@ export interface ConfirmResponse {
   count?: number;
   total?: number;
   results?: unknown[];
+  /** The same rows as `results`, under the name newer servers use. */
+  items?: unknown[];
   kind?: string;
   /** A permission approve: false when the agent was never unblocked. */
   replied?: boolean;

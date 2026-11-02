@@ -726,6 +726,14 @@ function claimAvailable(callId: string): boolean {
   return !props.turn?.hiddenByOwner && steps.value.some((step) => step.callId === callId);
 }
 
+// A write behind its card is in this answer but lists no step, so citing it is no access gap for an admin to fix.
+function heldWithoutStep(callId: string): boolean {
+  return (
+    !props.turn?.hiddenByOwner &&
+    blocks.value.some((block) => block.call_id === callId || block.approval?.id === callId)
+  );
+}
+
 function claimLabel(callId: string): I18nText {
   const step = steps.value.find((candidate) => candidate.callId === callId);
   return step
@@ -740,7 +748,8 @@ const unavailableClaims = computed(() => {
       (block.findings?.evidence ?? []).flatMap((item) => (item.callId ? [item.callId] : [])),
     ),
   ];
-  return new Set(claims.filter((callId) => !claimAvailable(callId))).size;
+  return new Set(claims.filter((callId) => !claimAvailable(callId) && !heldWithoutStep(callId)))
+    .size;
 });
 
 const footerRenderer = computed(() =>

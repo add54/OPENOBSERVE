@@ -1255,6 +1255,41 @@ describe("MetricsExplorer wiring", () => {
             expect(vm.selectedDate).toMatchObject({ relativeTimePeriod: "6h" });
           });
 
+          it("lands a repeat link's new range without querying anything", () => {
+            visualizePanel = {
+              data: { type: "line", queries: [{ query: "up", fields: {} }] },
+            };
+            const vm = open();
+            grid.sweepSlice.mockClear();
+            grid.requestPreview.mockClear();
+
+            routerState.query = { ...landed, t: "2", period: "6h" };
+            vm.onRouteQueryChange();
+
+            expect(vm.selectedDate).toMatchObject({ relativeTimePeriod: "6h" });
+            expect(grid.sweepSlice).not.toHaveBeenCalled();
+            expect(grid.requestPreview).not.toHaveBeenCalled();
+          });
+
+          it("reads a second link's millisecond range as the same window, not 1970", () => {
+            const vm = open();
+            const { period: _period, ...noPeriod } = landed;
+
+            routerState.query = {
+              ...noPeriod,
+              t: "2",
+              from: "1793532000000",
+              to: "1793575000000",
+            };
+            vm.onRouteQueryChange();
+
+            expect(vm.selectedDate).toMatchObject({
+              valueType: "absolute",
+              startTime: "1793532000000000",
+              endTime: "1793575000000000",
+            });
+          });
+
           it("leaves the open chart alone on the link's own URL updates", () => {
             const vm = open();
             const mounted = vm.visualizeMount;

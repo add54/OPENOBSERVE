@@ -28,12 +28,17 @@ import { fakeAssistant } from "./fakeAssistant";
 
 /** A live evidence host over a real store: dispatch is a spy, runs are set by the spec. */
 export function fakeEvidence(
-  over: { messages?: ChatMessage[]; creditMode?: "free" | "exhausted" | "pay_as_you_go" } = {},
+  over: {
+    messages?: ChatMessage[];
+    creditMode?: "free" | "exhausted" | "pay_as_you_go";
+    isAdmin?: boolean;
+  } = {},
 ) {
   // Annotations persist per user and org, so a fresh host starts without a previous spec's.
   localStorage.clear();
   const { store, capability } = fakeAssistant("available", {
     ...(over.creditMode && { creditMode: over.creditMode }),
+    ...(over.isAdmin !== undefined && { isAdmin: over.isAdmin }),
   });
   const sid = store.createSession({
     origin: { entryKind: "header_button", objectKind: "none", container: "sidebar" },

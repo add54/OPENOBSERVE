@@ -90,6 +90,7 @@ const READ_SEGMENTS: [&str; 17] = [
 const READ_PREFIXES: [&str; 4] = ["_search", "_around", "_values", "_correlate"];
 // A POST whose path names one of these removes something.
 const DELETE_WORDS: [&str; 4] = ["delete", "remove", "purge", "drop"];
+const MUTE_PATH: &str = "/api/v2/{org_id}/alerts/{alert_id}/mute";
 
 static RECORDER: OnceLock<Arc<dyn Recorder>> = OnceLock::new();
 static LOOPBACK: OnceCell<(reqwest::Client, url::Url)> = OnceCell::const_new();
@@ -328,6 +329,8 @@ pub struct Plan {
     resource_id: Option<String>,
     query: Map<String, Value>,
     body: Option<Value>,
+    /// A quick mute, undone by cancelling the downtime it created.
+    mutes: bool,
 }
 
 impl Plan {
@@ -482,6 +485,7 @@ pub fn plan(
         resource_id,
         query,
         body,
+        mutes: kind == Some(ResourceKind::Alert) && method == "POST" && metadata.path == MUTE_PATH,
     })
 }
 
@@ -509,6 +513,7 @@ pub async fn finish(
         (Some(kind), Op::Create | Op::Update, Some(id)) if ok => {
             Some(fetch(kind, &plan.org_id, id, auth).await)
         }
+        (_, _, Some(_)) if ok && plan.mutes => muted_downtime(response.as_ref()),
         _ => None,
     };
     let recorded = recorded(plan, before, after, resource_id, (ok, status_code));
@@ -744,7 +749,7 @@ fn recorded(
             })
     });
     let before = before.map(|v| envelope(plan.kind, &v, Some(&plan.query)));
-    let after = after.map(|v| envelope(plan.kind, &v, None));
+    let after = after.map(|v| envelope(plan.kind, &v, plan.mutes.then_some(&plan.query)));
     let undo_reason = undo_reason(&plan, ok, resource_id.as_deref(), &before, &after);
     Recorded {
         org_id: plan.org_id,
@@ -774,7 +779,7 @@ fn undo_reason(
     if !ok {
         return Some(REASON_FAILED);
     }
-    if plan.kind.is_none() || plan.op == Op::Other {
+    if plan.kind.is_none() || (plan.op == Op::Other && !plan.mutes) {
         return Some(REASON_UNSUPPORTED);
     }
     if resource_id.is_none() {
@@ -788,7 +793,7 @@ fn undo_reason(
         Op::Create => needed(after),
         Op::Update => needed(before).or_else(|| needed(after)),
         Op::Delete => needed(before),
-        Op::Other => Some(REASON_UNSUPPORTED),
+        Op::Other => needed(after),
     }
 }
 
@@ -858,8 +863,48 @@ fn reverse_request(target: &UndoTarget<'_>, current: &Snapshot) -> Result<Reques
                 body: Some(body),
             })
         }
-        (Op::Other, _) => Err(UndoOutcome::Refused(400)),
+        (Op::Other, current) => unmute_request(target, after.as_ref(), current),
     }
+}
+
+/// The mute's own cancel route; an alert gone since has nothing left to unmute.
+fn unmute_request(
+    target: &UndoTarget<'_>,
+    after: Option<&Value>,
+    current: &Snapshot,
+) -> Result<Request, UndoOutcome> {
+    let downtime_id = after
+        .and_then(|a| a["object"]["downtime_id"].as_str())
+        .filter(|id| !id.is_empty() && target.kind == ResourceKind::Alert)
+        .ok_or(UndoOutcome::Refused(400))?;
+    if matches!(current, Snapshot::Missing) {
+        return Err(UndoOutcome::ChangedSince {
+            changed_by: None,
+            at: None,
+        });
+    }
+    let query = after
+        .and_then(|a| a.get("query"))
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+        .filter(|(key, _)| target.kind.replay_query().contains(&key.as_str()))
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+    let mut segments = path_segments(MUTE_PATH, target.org_id, target.resource_id);
+    segments.extend([downtime_id.to_string(), "cancel".to_string()]);
+    Ok(Request {
+        method: Method::POST,
+        segments,
+        query,
+        body: None,
+    })
+}
+
+/// What a mute's undo needs from its answer: the id of the downtime it created.
+fn muted_downtime(response: Option<&Value>) -> Option<Snapshot> {
+    let id = response?.get("downtime_id")?.as_str()?;
+    Some(Snapshot::Found(json!({ "downtime_id": id })))
 }
 
 /// Whether `current` is still the object the assistant left, ignoring server-maintained fields.
@@ -1391,6 +1436,62 @@ mod tests {
                     "f1".into()
                 ]
             )
+        );
+    }
+
+    #[test]
+    fn a_mute_is_undone_by_cancelling_the_downtime_it_created() {
+        let mute = || {
+            planned(
+                "POST",
+                MUTE_PATH,
+                json!({"alert_id": "a1", "folder": "f", "request_body": {"minutes": 30}}),
+            )
+            .unwrap()
+        };
+        assert!(mute().mutes && mute().op == Op::Other);
+        let answer = json!({"downtime_id": "dt1", "version": 1, "ends_at": 9});
+        let after = muted_downtime(Some(&answer));
+        let row = recorded(mute(), None, after, Some("a1".into()), (true, 201));
+        assert!(row.undoable, "{:?}", row.undo_reason);
+        let stored: Value = serde_json::from_str(row.after.as_deref().unwrap()).unwrap();
+        assert_eq!(
+            stored,
+            json!({"object": {"downtime_id": "dt1"}, "query": {"folder": "f"}})
+        );
+        let unanswered = recorded(mute(), None, None, Some("a1".into()), (true, 201));
+        assert_eq!(unanswered.undo_reason, Some(REASON_NO_SNAPSHOT));
+        let enable = planned(
+            "PATCH",
+            "/api/v2/{org_id}/alerts/{alert_id}/enable",
+            json!({"alert_id": "a1"}),
+        )
+        .unwrap();
+        assert!(!enable.mutes);
+        let enable = recorded(enable, None, None, Some("a1".into()), (true, 200));
+        assert_eq!(enable.undo_reason, Some(REASON_UNSUPPORTED));
+
+        let after = row.after.unwrap();
+        let t = UndoTarget {
+            resource_id: "a1",
+            ..target(Op::Other, ResourceKind::Alert, None, Some(&after))
+        };
+        let request = reverse_request(&t, &Snapshot::Found(json!({"id": "a1"}))).unwrap();
+        assert_eq!(request.method, Method::POST);
+        assert_eq!(
+            request.segments,
+            ["api", "v2", "o", "alerts", "a1", "mute", "dt1", "cancel"]
+        );
+        assert_eq!(request.query["folder"], "f");
+        assert!(request.body.is_none());
+        assert!(matches!(
+            reverse_request(&t, &Snapshot::Missing).unwrap_err(),
+            UndoOutcome::ChangedSince { .. }
+        ));
+        let other = target(Op::Other, ResourceKind::Alert, None, None);
+        assert_eq!(
+            reverse_request(&other, &Snapshot::Found(json!({}))).unwrap_err(),
+            UndoOutcome::Refused(400)
         );
     }
 

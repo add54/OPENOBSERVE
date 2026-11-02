@@ -65,7 +65,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
       data-test="assistant-queries-no-access"
     >
       <span>{{ noAccessLine }}</span>
-      <template v-if="!readonly">
+      <template v-if="!readonly && !isAdmin">
         <span aria-hidden="true">·</span>
         <AssistantAskAdminPopover kind="access" :org="turn?.org ?? ''">
           <template #trigger>
@@ -297,6 +297,8 @@ const widerOffer = computed(() => {
 });
 const widerDuration = computed(() => widerPeriodText());
 
+// An admin is who the reader would ask, so the ask is never offered to one.
+const isAdmin = computed(() => !!evidence?.capability().isAdmin);
 const noAccessLine = computed<I18nText>(() => {
   const n = props.unavailable;
   const stream = chatStream.value;

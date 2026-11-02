@@ -19,6 +19,8 @@ import { nextTick } from "vue";
 
 import { fakeAssistant, fakeRouter, fakeVuex } from "../__tests__/fakeAssistant";
 import AssistantDecisionNotice from "./AssistantDecisionNotice.vue";
+import { setDrawerInsetEnd } from "@/lib/overlay/Drawer/drawerInset";
+
 import { fakeRuns, runRow } from "./runsTestKit";
 
 const { fake } = vi.hoisted(() => ({ fake: { current: null as any, runs: null as any } }));
@@ -225,5 +227,54 @@ describe("AssistantDecisionNotice", () => {
     runs.decisions.value = [];
     await nextTick();
     expect(notice()).toBeNull();
+  });
+
+  describe("placement", () => {
+    afterEach(() => setDrawerInsetEnd(0));
+
+    it("ends at the open sidebar, so it never covers the composer and Send", async () => {
+      setDrawerInsetEnd(384);
+      setup();
+      await nextTick();
+      expect(notice()?.dataset.side).toBe("end");
+      expect(notice()?.style.getPropertyValue("--o-notice-end")).toBe("384");
+      expect(notice()?.className).toContain("end-[calc(var(--o-notice-end,0)*0.0625rem+1rem)]");
+    });
+
+    it("takes the start corner in the full view", async () => {
+      fake.current = fakeAssistant();
+      fake.runs = fakeRuns();
+      fake.runs.decisions.value = [decision("a")];
+      const router = fakeRouter();
+      await router.push("/assistant");
+      mount(AssistantDecisionNotice, {
+        attachTo: document.body,
+        global: { plugins: [router, fakeVuex()] },
+      });
+      await nextTick();
+      expect(notice()?.dataset.side).toBe("start");
+      expect(notice()?.className).toContain("start-4");
+    });
+
+    it("yields the end corner to a focused window holding it, and takes it back after", async () => {
+      const win = document.createElement("div");
+      win.dataset.assistantWindow = "w1";
+      win.getBoundingClientRect = () =>
+        ({ left: 600, right: 1010, top: 300, bottom: 750 }) as DOMRect;
+      document.body.appendChild(win);
+      const size = vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(320);
+      const tall = vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(120);
+      const { store } = setup();
+      store.state.shell.lastFocusedContainer = { window: "w1" };
+      vi.advanceTimersByTime(1_000);
+      await nextTick();
+      expect(notice()?.dataset.side).toBe("start");
+      store.state.shell.lastFocusedContainer = "sidebar";
+      vi.advanceTimersByTime(1_000);
+      await nextTick();
+      expect(notice()?.dataset.side).toBe("end");
+      size.mockRestore();
+      tall.mockRestore();
+    });
   });
 });

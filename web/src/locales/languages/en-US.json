@@ -9959,8 +9959,11 @@
       "nothingSelected": "Nothing selected",
       "open": "Open",
       "reason": {
+        "conflict": "It already exists or is already in that state",
         "forbidden": "no permission",
         "notFound": "not found",
+        "rateLimited": "Too many requests, try again shortly",
+        "server": "The server couldn't complete it",
         "status": "error {code}",
         "unknown": "error"
       },

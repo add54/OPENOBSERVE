@@ -155,6 +155,28 @@ describe("ActivityTab", () => {
     expect(assistantSettings.undoActivity).toHaveBeenCalledWith("acme", "a1");
   });
 
+  it("reads a row undone here as undone at once and reloads the table", async () => {
+    vi.mocked(assistantSettings.activity).mockResolvedValue({ rows: [ENTRY] });
+    vi.mocked(assistantSettings.undoActivity).mockResolvedValue();
+    confirm.mockResolvedValue(true);
+    const w = (wrapper = await mountTab(ActivityTab, true));
+    const before = vi.mocked(assistantSettings.activity).mock.calls.length;
+    await w.find('[data-test="settings-assistant-activity-a1-undo"]').trigger("click");
+    await settle();
+    await settle();
+    expect(vi.mocked(assistantSettings.activity).mock.calls.length).toBeGreaterThan(before);
+    expect(w.find('[data-test="settings-assistant-activity-a1-result"]').text()).toBe("Undone");
+    expect(w.find('[data-test="settings-assistant-activity-a1-undo"]').exists()).toBe(false);
+  });
+
+  it("names a target the server sent without a name by its id", async () => {
+    vi.mocked(assistantSettings.activity).mockResolvedValue({
+      rows: [{ ...ENTRY, target: { type: "alert", id: "3LY6Bc" } }],
+    });
+    const w = (wrapper = await mountTab(ActivityTab, true));
+    expect(w.text()).toContain("3LY6Bc");
+  });
+
   it("pages forward with the server cursor", async () => {
     vi.mocked(assistantSettings.activity).mockResolvedValue({ rows: [ENTRY], next_cursor: "n1" });
     const w = (wrapper = await mountTab(ActivityTab, true));

@@ -341,8 +341,8 @@ impl StreamState {
                 continue;
             }
             if byte == b'\n' {
-                // An inline span never crosses a line, so a stray backtick cannot hide the rest.
-                if matches!(self.code, CodeSpan::Inline(_)) {
+                // A span may wrap a line, not a paragraph: a stray backtick cannot hide the rest.
+                if matches!(self.code, CodeSpan::Inline(_)) && !self.mid_line {
                     self.push_segment(&mut out, &text[from..i]);
                     from = i;
                     self.code = CodeSpan::Prose;
@@ -1154,7 +1154,6 @@ pub fn attach_decisions(turn: &mut Value, decisions: &[Value]) {
     }
 }
 
-/// Settles each queued call's result frame with the outcome its stored card records at `now`.
 pub fn attach_card_outcomes(turn: &mut Value, cards: &[Value], now: i64) {
     let Some(Value::Array(frames)) = turn.get_mut("frames") else {
         return;
@@ -3410,7 +3409,8 @@ mod tests {
             .to_string();
         let answer = format!(
             "Use `re.sub(r\"[^1]\", \"\", value)` here [^{step}].\n~~~python\nx = \"[^99]\"\n~~~\n\
-             A `stray tick [^99]\nthen [^{step}][^99] and ``a`[^1]`` done.\n"
+             Wrapped `re.sub(\nr\"[^1]\", \"\", value)` too [^{step}].\n\
+             A `stray tick [^99]\n\nthen [^{step}][^99] and ``a`[^1]`` done.\n"
         );
         let text = answer_text(&last_frames(&session_answering(
             &answer,
@@ -3426,7 +3426,13 @@ mod tests {
             text.contains(&format!("then [^{step}] and ``a`[^1]`` done.")),
             "{text}"
         );
-        assert!(text.contains("`stray tick [^99]\n"), "{text}");
+        assert!(text.contains("`stray tick [^99]\n\n"), "{text}");
+        assert!(
+            text.contains(&format!(
+                "`re.sub(\nr\"[^1]\", \"\", value)` too [^{step}]."
+            )),
+            "{text}"
+        );
         assert_eq!(
             StreamState::default().rewrite_claim_markers("a ~~~ b [^1]"),
             "a ~~~ b "

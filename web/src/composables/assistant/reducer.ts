@@ -151,6 +151,8 @@ export interface ResolvedBlockData {
   outcome?: ResolvedOutcome;
   /** The server's words for a denied, failed or partial outcome. */
   detail?: string;
+  /** Read back from the stored chat: the reader's own decision, never one heard from another tab. */
+  recorded?: boolean;
 }
 
 export type ResolvedOutcome = "approved" | "denied" | "failed" | "partial";

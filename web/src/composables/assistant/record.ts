@@ -502,7 +502,8 @@ export function projectRecord(
   const prepared = prepareTurns(turns, audience, options);
   const fold = audience === "owner" ? "owner" : "viewer";
   const { messages } = foldTurns(prepared, t, fold, "replay");
-  for (const message of messages) settleMessage(message, prepared, options, t);
+  for (const message of messages)
+    settleMessage(message, prepared, options, t, audience === "owner");
   return messages;
 }
 
@@ -614,6 +615,7 @@ function settleMessage(
   turns: StoredTurn[],
   options: ProjectRecordOptions,
   t: TranslateFn,
+  own: boolean,
 ): void {
   if (typeof message.sentAt === "number") message.sentAt = toMinute(message.sentAt);
   const blocks = message.contentBlocks ?? [];
@@ -633,6 +635,8 @@ function settleMessage(
       };
     }
     if (block.resolved?.at !== undefined) block.resolved.at = toMinute(block.resolved.at);
+    // Only the owner's own reload reads a stored decision as theirs; a reader sees someone else's.
+    if (block.resolved && own) block.resolved.recorded = true;
     if (options.redacted) redactNavigation(block, t);
     const hidden = block.call_id ? options.hidden?.[block.call_id] : undefined;
     if (hidden)

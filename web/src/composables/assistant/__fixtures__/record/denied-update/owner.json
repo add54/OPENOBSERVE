@@ -45,7 +45,8 @@
           "id": "apr_2",
           "approved": false,
           "by": "you",
-          "at": 1772417760000
+          "at": 1772417760000,
+          "recorded": true
         }
       },
       {

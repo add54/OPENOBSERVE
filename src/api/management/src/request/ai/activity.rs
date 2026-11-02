@@ -270,7 +270,7 @@ pub async fn list_activity(
     summary = "Undo one change the assistant made",
     description = "The member it was made for, or an org admin, within 24 h. A delete is \
                    re-created from the stored copy, an update reverted to it, a create \
-                   deleted. The reverse call runs as the caller through the same permission \
+                   deleted, an alert's quick mute cancelled. The reverse call runs as the caller through the same permission \
                    check as any API call, so a caller who lost access is refused (403). If \
                    the object changed after the action the undo is refused with 409 \
                    `changed_since`, and nothing is overwritten. The undo is a new ledger row; \
@@ -360,20 +360,27 @@ pub(crate) async fn record_confirm(
     rows
 }
 
-/// Names the undoable changes' ledger rows on `results`, which match `items` one to one.
-pub(crate) fn with_ledger_ids(response: &mut Value, rows: &[Option<ai_actions::Model>]) {
-    let Some(results) = response.get_mut("results").and_then(Value::as_array_mut) else {
-        return;
-    };
-    if results.len() != rows.len() {
-        return;
-    }
-    for (result, row) in results.iter_mut().zip(rows) {
-        if let (Some(result), Some(row)) = (result.as_object_mut(), row)
-            && row.undoable
-        {
-            result.insert("ledger_id".to_string(), row.id.clone().into());
-            result.insert("undoable".to_string(), true.into());
+/// Names each execution's ledger row and its undo on `results` and `items`, which match one to one.
+pub(crate) fn with_ledger_ids(response: &mut Value, rows: &[Option<ai_actions::Model>], now: i64) {
+    for key in ["results", "items"] {
+        let Some(entries) = response.get_mut(key).and_then(Value::as_array_mut) else {
+            continue;
+        };
+        if entries.len() != rows.len() {
+            continue;
+        }
+        for (entry, row) in entries.iter_mut().zip(rows) {
+            if let (Some(entry), Some(row)) = (entry.as_object_mut(), row) {
+                let undo = Undo::of(row, now);
+                entry.insert("ledger_id".to_string(), row.id.clone().into());
+                entry.insert("undoable".to_string(), undo.available.into());
+                if let Some(until) = undo.until.filter(|_| undo.available) {
+                    entry.insert("undo_until".to_string(), until.into());
+                }
+                if let Some(reason) = undo.reason {
+                    entry.insert("undo_reason".to_string(), reason.into());
+                }
+            }
         }
     }
 }
@@ -386,9 +393,13 @@ async fn confirmed_action(
     item: &Value,
     since: i64,
 ) -> Option<ai_actions::Model> {
-    let (kind, id) = (text(item, "type")?, text(item, "id")?);
-    let target = (kind.as_str(), id.as_str());
-    match ai_actions::stamp_execution(org_id, session_id, target, approval).await {
+    let (kind, id, name) = card_target(item)?;
+    let card = ai_actions::ConfirmedTarget {
+        resource_type: &kind,
+        resource_id: id.as_deref(),
+        resource_name: name.as_deref(),
+    };
+    match ai_actions::stamp_execution(org_id, session_id, card, approval).await {
         Ok(Some(row)) => return Some(row),
         Ok(None) => {}
         Err(e) => {
@@ -396,6 +407,9 @@ async fn confirmed_action(
             return None;
         }
     }
+    // Without an id nothing else can name the object a create made.
+    let id = id?;
+    let target = (kind.as_str(), id.as_str());
     let stamped = ai_actions::stamp_approval(org_id, session_id, target, approval, since).await;
     match stamped {
         Ok(Some(_)) => {}
@@ -409,6 +423,11 @@ async fn confirmed_action(
         Err(e) => log::error!("[org_id:{org_id}] cannot stamp a confirmed action: {e}"),
     }
     None
+}
+
+/// An item's `(type, id, name)`; o2-ai sends an empty id for a create, which has none yet.
+fn card_target(item: &Value) -> Option<(String, Option<String>, Option<String>)> {
+    Some((text(item, "type")?, text(item, "id"), text(item, "name")))
 }
 
 /// The card a `/confirm` decided: o2-ai's answer first, else whichever id key the body used.
@@ -857,26 +876,51 @@ mod tests {
     }
 
     #[test]
-    fn only_an_undoable_change_names_its_ledger_row_on_its_result() {
+    fn each_execution_names_its_ledger_row_and_undo_on_results_and_items() {
         let undoable = ai_actions::Model {
             id: "row-1".into(),
             ..ledger_row(action(), false, NOW)
         };
         let fixed = ai_actions::Model {
+            id: "row-2".into(),
             undoable: false,
+            undo_reason: Some(ledger::REASON_UNSUPPORTED.into()),
             ..undoable.clone()
         };
-        let mut answer =
-            json!({"results": [{"resource": "a"}, {"resource": "b"}, {"resource": "c"}]});
-        with_ledger_ids(&mut answer, &[Some(undoable.clone()), Some(fixed), None]);
-        assert_eq!(answer["results"][0]["ledger_id"], "row-1");
-        assert_eq!(answer["results"][0]["undoable"], true);
-        assert_eq!(answer["results"][1], json!({"resource": "b"}));
-        assert_eq!(answer["results"][2], json!({"resource": "c"}));
+        let mut answer = json!({
+            "results": [{"resource": "a"}, {"resource": "b"}, {"resource": "c"}],
+            "items": [{"name": "a"}, {"name": "b"}, {"name": "c"}],
+        });
+        let rows = [Some(undoable.clone()), Some(fixed), None];
+        with_ledger_ids(&mut answer, &rows, NOW);
+        for key in ["results", "items"] {
+            let entries = &answer[key];
+            assert_eq!(entries[0]["ledger_id"], "row-1", "{key}");
+            assert_eq!(entries[0]["undoable"], true);
+            assert_eq!(entries[0]["undo_until"], NOW + UNDO_WINDOW_MICROS);
+            assert!(entries[0].get("undo_reason").is_none());
+            assert_eq!(entries[1]["ledger_id"], "row-2");
+            assert_eq!(entries[1]["undoable"], false);
+            assert_eq!(entries[1]["undo_reason"], "unsupported");
+            assert!(entries[1].get("undo_until").is_none());
+            assert!(entries[2].get("ledger_id").is_none());
+        }
 
         let mut uneven = json!({"results": [{"resource": "a"}, {"resource": "b"}]});
-        with_ledger_ids(&mut uneven, &[Some(undoable)]);
+        with_ledger_ids(&mut uneven, &[Some(undoable)], NOW);
         assert_eq!(uneven["results"][0], json!({"resource": "a"}));
+    }
+
+    #[test]
+    fn a_created_items_empty_id_still_names_its_card_target() {
+        let create = json!({"id": "", "type": "alert", "name": "e2e-undo", "status": "done"});
+        assert_eq!(
+            card_target(&create),
+            Some(("alert".into(), None, Some("e2e-undo".into())))
+        );
+        let mute = json!({"id": "a1", "type": "alert", "name": "cpu", "status": "done"});
+        assert_eq!(card_target(&mute).unwrap().1.as_deref(), Some("a1"));
+        assert!(card_target(&json!({"id": "a1"})).is_none());
     }
 
     #[test]

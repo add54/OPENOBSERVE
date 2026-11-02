@@ -149,7 +149,7 @@ export type {
   StepResult,
 } from "./evidence";
 export type { QueryRun } from "./actions/appliers/query";
-export { canAlwaysAllow } from "./actions/appliers/approval";
+export { canAlwaysAllow, recordedLedger } from "./actions/appliers/approval";
 export {
   approvalDiff,
   approvalEditor,
