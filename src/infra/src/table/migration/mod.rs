@@ -248,7 +248,7 @@ mod m20261030_000001_add_suppress_repeats_to_alerts;
 mod m20261030_000001_create_org_domain_ownership_table;
 mod m20261030_000002_create_org_domain_ownership_req_table;
 mod m20261101_000001_create_oncall_slack;
-mod m20261024_000002_add_alert_incident_title_template;
+mod m20261102_000001_add_alert_incident_title_template;
 /// Shared body of the two `folder_id` migrations above; not a migration itself.
 mod workflow_folder_id;
 
@@ -355,7 +355,7 @@ pub(crate) async fn create_composite_alert_tables_for_test(
         .await?;
     manager
         .alter_table(
-            m20261024_000002_add_alert_incident_title_template::get_update_stmt_composites(),
+            m20261102_000001_add_alert_incident_title_template::get_update_stmt_composites(),
         )
         .await?;
     Ok(())
@@ -381,7 +381,7 @@ pub(crate) fn composite_alert_migration_sql_for_test(
             .to_string(),
         backend
             .build(
-                &m20261024_000002_add_alert_incident_title_template::get_update_stmt_composites(),
+                &m20261102_000001_add_alert_incident_title_template::get_update_stmt_composites(),
             )
             .to_string(),
     ];
@@ -778,7 +778,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261030_000001_create_org_domain_ownership_table::Migration),
             Box::new(m20261030_000002_create_org_domain_ownership_req_table::Migration),
             Box::new(m20261101_000001_create_oncall_slack::Migration),
-            Box::new(m20261024_000002_add_alert_incident_title_template::Migration),
+            Box::new(m20261102_000001_add_alert_incident_title_template::Migration),
         ]
     }
 }
@@ -879,7 +879,7 @@ mod tests {
             "m20261030_000002_create_org_domain_ownership_req_table",
         ),
         (132, "m20261101_000001_create_oncall_slack"),
-        (133, "m20261024_000002_add_alert_incident_title_template"),
+        (133, "m20261102_000001_add_alert_incident_title_template"),
     ];
 
     // Two branches that each claim the next version merge cleanly, so a reused number must fail
