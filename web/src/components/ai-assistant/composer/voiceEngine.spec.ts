@@ -155,6 +155,10 @@ describe("createBrowserEngine", () => {
     await expect(createBrowserEngine().canRunOnDevice("en-US")).resolves.toBe(true);
     FakeRecogniser.available.mockRejectedValueOnce(new Error("nope"));
     await expect(createBrowserEngine().canRunOnDevice("en-US")).resolves.toBe(false);
+    FakeRecogniser.available.mockImplementationOnce(() => {
+      throw new Error("nope");
+    });
+    await expect(createBrowserEngine().canRunOnDevice("en-US")).resolves.toBe(false);
   });
 
   it("releases the microphone when it closes the meter", async () => {

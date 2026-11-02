@@ -431,6 +431,8 @@ export interface ApprovalOutcome {
   httpStatus?: number;
   /** Who decided elsewhere, from `confirmation_resolved.by`. */
   by?: string;
+  /** Why a decision came to nothing, in the server's words from `detail`. */
+  reason?: string;
 }
 
 /** A mutation this chat made (AA-10); undo only where the object's API allows it. */
@@ -444,6 +446,8 @@ export interface ActionLedgerEntry {
   status: "done" | "failed" | "undone";
   undoable: boolean;
   at: number;
+  /** Why a failed entry did not happen, in the server's words. */
+  reason?: string;
   undoneAt?: number;
   /** An undo of this entry is on its way; a second one is refused. */
   undoing?: boolean;

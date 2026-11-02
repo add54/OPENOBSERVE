@@ -362,7 +362,7 @@ function lightView(): HeaderView {
               { ...p, count: waiting },
             )
           : t(open ? "assistant.header.needsYouNameOpen" : "assistant.header.needsYouName", p),
-        consent ? t("assistant.turn.waitingConsent") : t("assistant.header.stateNeedsApproval"),
+        consent ? t("assistant.turn.waitingConsent") : t("assistant.notice.decision"),
       ),
       signal: "attention",
       ...(waiting > 0 && { count: waiting }),
@@ -426,7 +426,7 @@ function otherOrgView(): HeaderView | null {
       ...plain(
         "needs_you",
         t("assistant.header.needsYouCountName", { ...p, count: waiting }),
-        t("assistant.header.stateNeedsApproval"),
+        t("assistant.notice.decision"),
       ),
       signal: "attention",
       count: waiting,

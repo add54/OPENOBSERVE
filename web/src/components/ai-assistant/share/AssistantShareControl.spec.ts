@@ -81,7 +81,9 @@ function vuex(zoConfig: Record<string, unknown> = {}) {
   });
 }
 
-function chat(opts: { turns?: boolean; running?: boolean; chips?: boolean } = {}) {
+function chat(
+  opts: { turns?: boolean; running?: boolean; chips?: boolean; serverBacked?: boolean } = {},
+) {
   const store = fake.current.store;
   const sid = store.createSession({
     origin: { entryKind: "header_button", objectKind: "none", container: "sidebar" },
@@ -94,6 +96,7 @@ function chat(opts: { turns?: boolean; running?: boolean; chips?: boolean } = {}
     ];
   }
   session.turn = opts.running ? { state: "responding.writing" } : { state: "idle" };
+  if (opts.serverBacked) session.record.serverBacked = true;
   return sid;
 }
 
@@ -273,7 +276,7 @@ describe("AssistantShareControl", () => {
   });
 
   it("keeps an existing link's Copy and Revoke reachable while an answer runs", async () => {
-    await setup({}, { running: true, shares: [share()] });
+    await setup({}, { running: true, serverBacked: true, shares: [share()] });
     await flushPromises();
     expect(document.querySelector('[data-test="assistant-share-copy"]')).not.toBeNull();
     expect(document.querySelector('[data-test="assistant-share-revoke"]')).not.toBeNull();
@@ -282,6 +285,21 @@ describe("AssistantShareControl", () => {
         .querySelector('[data-test="assistant-share-update-snapshot"]')
         ?.getAttribute("aria-disabled"),
     ).toBe("true");
+  });
+
+  it("does not ask for a new chat's links before its first answer is stored", async () => {
+    await setup({}, { running: true });
+    expect(api.listForChat).not.toHaveBeenCalled();
+  });
+
+  it("asks for a stored chat's links while its next answer runs", async () => {
+    await setup({}, { running: true, serverBacked: true });
+    expect(api.listForChat).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks for a chat's links once an answer has finished", async () => {
+    await setup({}, {});
+    expect(api.listForChat).toHaveBeenCalledTimes(1);
   });
 
   it("creates a second link for another audience beside an existing one, without revoking", async () => {

@@ -373,7 +373,6 @@ const newLabel = computed<I18nText>(() =>
   object.value ? raw(object.value.newLabel) : t("assistant.thread.newChat"),
 );
 const narrow = computed(() => {
-  // A window's borders take 2 px from its bar, so at 24 rem only its geometry reads as 24 rem.
   if (props.placement === "window") return props.narrow;
   return props.narrow || props.placement === "sheet" || widthRem.value < NARROW_REM;
 });

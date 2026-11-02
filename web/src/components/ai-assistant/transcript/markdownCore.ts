@@ -131,6 +131,8 @@ const MAX_LINKS = 10;
 // The whitespace before a marker goes with it, so a chip sits against its word and never before punctuation.
 const CLAIM_MARKER = /[ \t]*\[\^([A-Za-z0-9_-]{1,64})\]/g;
 
+const UNRESOLVED_CLAIM = /^\d+$/;
+
 // Private-use characters hold a claim's place through escaping until the renderer writes its slot.
 const CLAIM_SLOT = /\uE000(\d{1,3})\uE001/g;
 
@@ -473,6 +475,8 @@ function stripClaims(tokens: Token[], claims: string[], open: boolean): void {
     if (leaf.type !== "text") continue;
     const textLeaf = leaf as Tokens.Text;
     textLeaf.text = textLeaf.text.replace(CLAIM_MARKER, (_all, id: string) => {
+      // o2-ai turns a position into a call id, so a bare number left in stored text names no step.
+      if (UNRESOLVED_CLAIM.test(id)) return "";
       if (!claims.includes(id)) claims.push(id);
       return `\uE000${claims.indexOf(id)}\uE001`;
     });

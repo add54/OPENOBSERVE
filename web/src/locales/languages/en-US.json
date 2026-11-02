@@ -9823,6 +9823,7 @@
     "actions": {
       "count": "{count} action in this chat | {count} actions in this chat",
       "entry": "{operation} {name} · approved by {user} · {time}",
+      "failedEntry": "Couldn't complete this: {name} · {reason} · {time}",
       "heading": "Actions in this chat",
       "noReview": "No review step",
       "op": {
@@ -10973,7 +10974,6 @@
       "readyName": "{product}, answer ready",
       "stateDone": "Answer ready: {title}",
       "stateFailed": "Answer failed: {title}",
-      "stateNeedsApproval": "Waiting for your approval",
       "stateOpen": "{product} · Open",
       "stateRunningCount": "{count} answer running | {count} answers running",
       "stateWorking": "Answering: {title}",

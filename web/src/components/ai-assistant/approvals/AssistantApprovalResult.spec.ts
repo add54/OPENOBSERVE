@@ -344,6 +344,42 @@ describe("AssistantApprovalResult", () => {
     expect(line(wrapper)).toMatch(/^Approved in another tab · /);
   });
 
+  it("keeps the record of a Deny made here when its confirmation_resolved follows", () => {
+    const resolved: ContentBlock = {
+      type: "approval_result",
+      resolved: { id: "c9", approved: false, at: 1 },
+    };
+    const outcome = { state: "declined" as const, at: 1 };
+    const card = mountRecord({ outcome }, { blocks: [resolved, block] });
+    expect(line(card.wrapper)).toBe("Denied: delete 2 alerts");
+    const echo = mountRecord({ outcome }, { blocks: [block, resolved] });
+    expect(echo.wrapper.find('[data-test="assistant-approval-result"]').exists()).toBe(false);
+  });
+
+  it("reads a confirmation_resolved whose approve failed as failed, in the server's words", () => {
+    const resolved: ContentBlock = {
+      type: "approval_result",
+      resolved: {
+        id: "c9",
+        approved: true,
+        at: 1,
+        outcome: "failed",
+        detail: "OpenObserve did not accept the assistant's approval for this change.",
+      },
+    };
+    const { wrapper } = mountRecord(null, { blocks: [block, resolved] });
+    expect(line(wrapper)).toBe(
+      "Nothing was changed. OpenObserve did not accept the assistant's approval for this change.",
+    );
+  });
+
+  it("names a refusal by the server's detail when it lists no rows", () => {
+    const { wrapper } = mountRecord({
+      outcome: { state: "failed", at: 1, reason: "Policy refused this change." },
+    });
+    expect(line(wrapper)).toBe("Nothing was changed. Policy refused this change.");
+  });
+
   it("reads an expired or withdrawn confirmation_resolved as that, never as a denial", () => {
     const ended = (flag: "expired" | "withdrawn") =>
       line(

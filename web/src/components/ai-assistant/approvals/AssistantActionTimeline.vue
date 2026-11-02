@@ -66,7 +66,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
             <OTag variant="default-soft" size="xs" :label="t('assistant.actions.noReview')" />
           </li>
         </ul>
-        <OText variant="meta" as="p" data-test="assistant-action-timeline-limits">
+        <OText v-if="anyApplied" variant="meta" as="p" data-test="assistant-action-timeline-limits">
           {{ anyUndoable ? t("assistant.actions.undoLimits") : t("assistant.actions.undoNotYet") }}
         </OText>
       </div>
@@ -110,6 +110,9 @@ const { t } = useI18nTyped();
 
 const count = computed(() => props.entries.length + props.unreviewed.length);
 const anyUndoable = computed(() => props.entries.some((entry) => entry.undoable));
+const anyApplied = computed(
+  () => !!props.unreviewed.length || props.entries.some((entry) => entry.status !== "failed"),
+);
 
 const rows = computed(() =>
   props.entries.map((entry) => {
@@ -123,13 +126,21 @@ const rows = computed(() =>
         : entry.status === "undone"
           ? assistantGlyph.undo
           : assistantGlyph.done;
-    const text = t("assistant.actions.entry", {
-      operation,
-      name,
-      user: t("assistant.actions.you"),
-      time: raw(formatOrgTime(entry.at)),
-    });
-    return { id: entry.id, entry, glyph, text, failed: entry.status === "failed" };
+    const time = raw(formatOrgTime(entry.at));
+    const failed = entry.status === "failed";
+    const text = failed
+      ? t("assistant.actions.failedEntry", {
+          name,
+          reason: entry.reason ? raw(entry.reason) : t("assistant.approval.reason.unknown"),
+          time,
+        })
+      : t("assistant.actions.entry", {
+          operation,
+          name,
+          user: t("assistant.actions.you"),
+          time,
+        });
+    return { id: entry.id, entry, glyph, text, failed };
   }),
 );
 

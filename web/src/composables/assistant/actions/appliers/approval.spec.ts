@@ -220,6 +220,42 @@ describe("approval applier", () => {
     expect(stateOf()).toBe("unconfirmed");
   });
 
+  it("reads the server's failed outcome as failed with its own words, and keeps each refused row's reason", async () => {
+    const { sid, env, session, dispatcher } = withCard();
+    const detail = "OpenObserve did not accept the assistant's approval for this change.";
+    env.confirm.mockResolvedValueOnce({
+      approved: true,
+      results: [
+        { resource: "checkout-latency-old", resource_type: "alert", deleted: false, detail },
+      ],
+      resolved: { outcome: "failed", detail, code: "approval_secret_unset" },
+    });
+    await dispatcher.approvals(sid, {
+      kind: "approval",
+      approvalId: "c9",
+      decision: { approved: true, scope: "once" },
+    });
+    const kept = session.annotations[approvalAnnotationKey("c9")];
+    expect(kept.approvalOutcome).toMatchObject({ state: "failed", reason: detail });
+    expect(session.ledger[0]).toMatchObject({ status: "failed", reason: detail });
+  });
+
+  it("reads a failed outcome with no rows as failed, never as approved", async () => {
+    const { sid, env, store, dispatcher } = withCard();
+    env.confirm.mockResolvedValueOnce({
+      approved: true,
+      resolved: { outcome: "failed", detail: "Policy refused this change." },
+    });
+    await dispatcher.approvals(sid, {
+      kind: "approval",
+      approvalId: "c9",
+      decision: { approved: true, scope: "once" },
+    });
+    expect(
+      store.state.sessions[sid].annotations[approvalAnnotationKey("c9")].approvalOutcome,
+    ).toMatchObject({ state: "failed", reason: "Policy refused this change." });
+  });
+
   it("reads an approve answered 5xx as unknown, never as nothing changed, and a decline answered 5xx as undelivered", async () => {
     const { sid, env, store, dispatcher } = withCard();
     env.confirm.mockRejectedValue({ response: { status: 502 } });

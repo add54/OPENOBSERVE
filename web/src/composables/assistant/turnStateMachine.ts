@@ -572,7 +572,7 @@ function onFrame(turn: TurnState, frame: AssistantFrame, ctx: TurnReducerCtx): S
     case "confirmation_required":
       return step({ state: "awaiting_approval", callId: frame.call_id ?? frame.id ?? frame.tool });
     case "ask_user":
-      return step({ state: "awaiting_approval", callId: frame.request_id });
+      return step({ state: "awaiting_approval", callId: frame.request_id, question: true });
     case "error":
       return onErrorFrame(turn, frame, ctx);
     case "complete":
@@ -817,6 +817,7 @@ function stateText(
   const results = progress?.results ?? 0;
   if (turn.state === "responding.thinking" && results > 0)
     return t("assistant.turn.thinkingAbout", { count: results }, results);
+  if (turn.state === "awaiting_approval" && turn.question) return t("assistant.notice.decision");
   return t(STATUS_KEYS[turn.state] ?? "assistant.turn.thinking");
 }
 

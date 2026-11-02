@@ -36,6 +36,7 @@ import type { ApprovalKind, ApprovalTarget, QuestionOption } from "./assistantSt
 import type { ConfirmationRequiredFrame, ConfirmationResolvedFrame, UsageFrame } from "./frames";
 
 const STEP_STATES: ReadonlySet<string> = new Set(["running", "done", "failed", "interrupted"]);
+const RESOLVED_OUTCOMES: ReadonlySet<string> = new Set(["approved", "denied", "failed", "partial"]);
 
 // An answer is untrusted: its steps and evidence blocks are capped so one stream cannot fill the tab.
 const MAX_STEPS = 200;
@@ -146,7 +147,13 @@ export interface ResolvedBlockData {
   answer?: string;
   /** The server dropped the card because the chat moved on; `approved` is false. */
   withdrawn?: boolean;
+  /** What an approved decision came to: `approved`, `denied`, `failed` or `partial`. */
+  outcome?: ResolvedOutcome;
+  /** The server's words for a denied, failed or partial outcome. */
+  detail?: string;
 }
+
+export type ResolvedOutcome = "approved" | "denied" | "failed" | "partial";
 
 /** A quiet notice in the turn: a policy denial or a change made without a review step. */
 export interface PolicyBlockData {
@@ -821,6 +828,8 @@ function typedToolResult(
   ctx: ReducerCtx,
   extras: StreamExtras,
 ): StreamEffect[] {
+  // A write queued behind its card has not run yet; the card and its record carry what happens to it.
+  if (data.error_type === "approval_pending") return queuedToolResult(state, data);
   const success = data.success !== false;
   const result: ContentBlock = {
     type: "tool_call",
@@ -843,6 +852,7 @@ function typedToolResult(
     success && data.call_args ? ctx.generateNavigation(data.tool, data.call_args, data) : null;
   if (navigationAction) result.navigationAction = navigationAction;
   const step = stepFor(state, callId, data.tool);
+  if (step?.pendingConfirmation) delete step.pendingConfirmation;
   // A result for a call the stream never announced is still a step, never dropped.
   if (step) Object.assign(step, result);
   else if (stepCount(state) < MAX_STEPS)
@@ -856,6 +866,27 @@ function typedToolResult(
   const tool = String(data.tool ?? "");
   if (success && MUTATING_TOOL_PATTERNS.test(tool))
     noteUnreviewed(state, resourceOfTool(tool), "tools");
+  return [{ kind: "scroll", whenActive: true }];
+}
+
+function queuedToolResult(state: StreamState, data: any): StreamEffect[] {
+  const callId = boundedId(data.call_id);
+  const waiting: ContentBlock = {
+    type: "tool_call",
+    pendingConfirmation: true,
+    errorType: "approval_pending",
+    resultMessage: String(data.message ?? "").slice(0, MAX_LINE_CHARS),
+  };
+  const step = stepFor(state, callId, data.tool);
+  if (step) Object.assign(step, waiting);
+  else if (stepCount(state) < MAX_STEPS)
+    appendBlock(state, {
+      ...waiting,
+      stepState: "running",
+      tool: String(data.tool ?? "").slice(0, MAX_TOOL_CHARS),
+      context: {},
+      call_id: callId,
+    });
   return [{ kind: "scroll", whenActive: true }];
 }
 
@@ -1056,6 +1087,8 @@ function typedResolved(state: StreamState, data: any, phase: StreamPhase): Strea
     ...(data.expired === true && { expired: true }),
     ...(data.withdrawn === true && { withdrawn: true }),
     ...(typeof data.answer === "string" && { answer: data.answer.slice(0, MAX_LINE_CHARS) }),
+    ...(RESOLVED_OUTCOMES.has(data.outcome) && { outcome: data.outcome }),
+    ...(typeof data.detail === "string" && { detail: data.detail.slice(0, MAX_LINE_CHARS) }),
   };
   appendBlock(state, { type: "approval_result", resolved });
   return phase === "live" ? [{ kind: "approval_resolved", frame: data }] : [];

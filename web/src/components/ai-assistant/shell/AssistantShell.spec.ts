@@ -1055,6 +1055,19 @@ describe("AssistantShell decision cards", () => {
     expect(wrapper.find('[data-test="assistant-strip-review"]').exists()).toBe(true);
   });
 
+  it("names a waiting question Needs you in the strip, never Review request", async () => {
+    const { wrapper, store, sid } = await mountWithCard();
+    Object.assign(store.state.sessions[sid].pendingApproval!, {
+      kind: "question",
+      message: "Which stream type should I list?",
+      options: [{ id: "logs", label: "Logs" }],
+    });
+    await flushPromises();
+    const review = wrapper.get('[data-test="assistant-strip-review"]');
+    expect(review.text()).toMatch(/^Needs you · \d+:\d\d$/);
+    expect(review.attributes("aria-label")).toBe("Needs you");
+  });
+
   it("leads back from a request reached from another chat, under its record alone", async () => {
     const { wrapper, store, sid } = await mountWithCard();
     const other = store.createSession({ origin: ORIGIN, thread: "new" });

@@ -277,15 +277,22 @@ const view = computed<ApprovalResultView | null>(() => {
     if (outcome) return null;
     const state = resolvedState(resolved.value);
     const at = resolved.value.at ?? Date.now();
+    const { by, detail } = resolved.value;
     return {
       state,
-      outcome: { state, at, ...(resolved.value.by && { by: resolved.value.by }) },
+      outcome: {
+        state,
+        at,
+        ...(by && { by }),
+        ...(state === "failed" && detail && { reason: detail }),
+      },
       result,
     };
   }
   if (!card.value) return null;
   if (sid.value && host?.pendingId(sid.value) === card.value.id) return null;
-  if (laterResolution(card.value.id)) return null;
+  // A decision made here keeps its own record even when its `confirmation_resolved` follows.
+  if (!outcome && laterResolution(card.value.id)) return null;
   if (outcome)
     return outcome.state === "expired" && expiredOutcome()
       ? null
@@ -501,12 +508,14 @@ function approvalOf(id: string | undefined): ApprovalBlockData | null {
   return null;
 }
 
+// An approval the server could not carry out changed nothing, wherever it was given.
 function resolvedState(
   block: ResolvedBlockData,
-): "expired" | "withdrawn" | "approved_elsewhere" | "declined_elsewhere" | "answered" {
+): "expired" | "withdrawn" | "approved_elsewhere" | "declined_elsewhere" | "answered" | "failed" {
   if (block.expired) return "expired";
   if (block.withdrawn) return "withdrawn";
   if (block.answer !== undefined) return "answered";
+  if (block.approved && (block.outcome === "failed" || block.outcome === "denied")) return "failed";
   return block.approved ? "approved_elsewhere" : "declined_elsewhere";
 }
 
@@ -593,12 +602,14 @@ function failedReason(): I18nText {
   if (status === 402) return t("assistant.approval.result.failedCredits");
   if (status === 412) return t("assistant.approval.result.failedConsent");
   const first = view.value?.result?.items.find((item) => item.status !== "done");
-  return first ? itemReason(first) : raw("");
+  if (first) return itemReason(first);
+  return view.value?.outcome?.reason ? raw(view.value.outcome.reason) : raw("");
 }
 
 function itemReason(item: ApprovalResultItem): I18nText {
   if (item.code === "403") return t("assistant.approval.reason.forbidden");
   if (item.code === "404") return t("assistant.approval.reason.notFound");
+  if (item.message) return raw(item.message);
   if (item.code) return t("assistant.approval.reason.status", { code: raw(item.code) });
   return t("assistant.approval.reason.unknown");
 }

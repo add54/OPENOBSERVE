@@ -210,6 +210,14 @@ const TABLE: [
     ["track_state", "pause"],
   ],
   [
+    "a question waits for the user, marked as a question",
+    S.writing,
+    { type: "ask_user", request_id: "q1", question: "Which stream?", options: [] },
+    {},
+    { state: "awaiting_approval", callId: "q1", question: true },
+    ["pause"],
+  ],
+  [
     "the decision resumes",
     S.approval,
     { type: "approval_decided", callId: "c9", approved: true },
@@ -746,6 +754,12 @@ describe("turnStatusText", () => {
     });
     const resumed = meta({ startedAt: 0, lastFrameAt: 60_000, pausedAt: null, pausedMs: 52_000 });
     expect(turnStatusText(S.thinking, resumed, t, 62_000)?.line).toBe("Thinking · 10 s");
+  });
+
+  it("says a waiting question needs the user, never that it waits for an approval", () => {
+    const paused = meta({ startedAt: 0, lastFrameAt: 0, pausedAt: 8_000, pausedMs: 0 });
+    const question = { state: "awaiting_approval", callId: "q1", question: true } as TurnState;
+    expect(turnStatusText(question, paused, t, 60_000)?.line).toBe("Needs you · paused at 8 s");
   });
 
   it("reads Caught up for 2 s after the tail catches up", () => {

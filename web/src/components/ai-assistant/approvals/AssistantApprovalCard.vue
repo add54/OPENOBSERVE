@@ -638,8 +638,9 @@ function focusDefault(): boolean {
 function announce(moved: boolean): void {
   const title = heading.value;
   const ms = remainingMs.value;
-  const line =
-    ms === null
+  const line = question.value
+    ? groupName.value
+    : ms === null
       ? t("assistant.announce.approval", { title })
       : t("assistant.announce.approvalExpires", { title, duration: duration(ms) });
   if (moved) return emit("announce", line);

@@ -26,6 +26,7 @@ import {
   type StreamPhase,
   type StreamState,
 } from "./reducer";
+import { stepsOf } from "./evidence";
 import { foldTurns } from "./record";
 import { approvalOutcomeOf } from "./useAssistantApprovals";
 import type { ChatMessage, NavigationAction } from "@/ts/interfaces/chat";
@@ -1105,6 +1106,75 @@ describe("reduce: typed phases (live)", () => {
       errorType: "query_error",
     });
     expect(state.extras).toMatchObject({ toolCalls: 1, toolErrors: 1 });
+  });
+
+  it("reads a write queued behind its card as waiting, never a failed step, and settles it when it runs", () => {
+    const state = makeState();
+    reduce(state, { type: "tool_call", tool: "MuteAlert", call_id: "c1" }, live());
+    reduce(
+      state,
+      {
+        type: "tool_result",
+        tool: "MuteAlert",
+        call_id: "c1",
+        success: false,
+        error_type: "approval_pending",
+        approval_id: "ap1",
+        message: "Waiting for your approval. Nothing has changed yet.",
+      },
+      live(),
+    );
+    expect(blocksOf(state)[0]).toMatchObject({ pendingConfirmation: true, stepState: "running" });
+    expect(blocksOf(state)[0].success).toBeUndefined();
+    expect(state.extras?.toolErrors ?? 0).toBe(0);
+    expect(stepsOf(state.messages[0], "org1")).toEqual([]);
+    reduce(state, { type: "tool_result", tool: "MuteAlert", call_id: "c1" }, live());
+    expect(blocksOf(state)).toHaveLength(1);
+    expect(blocksOf(state)[0]).toMatchObject({ stepState: "done", success: true });
+    expect(blocksOf(state)[0].pendingConfirmation).toBeUndefined();
+  });
+
+  it("reads a policy refusal as a failed step that keeps the server's words", () => {
+    const state = makeState();
+    reduce(state, { type: "tool_call", tool: "MuteAlert", call_id: "c1" }, live());
+    reduce(
+      state,
+      {
+        type: "tool_result",
+        tool: "MuteAlert",
+        call_id: "c1",
+        success: false,
+        error_type: "policy_refused",
+        message: "This org's policy does not allow muting alerts.",
+      },
+      live(),
+    );
+    expect(blocksOf(state)[0]).toMatchObject({
+      stepState: "failed",
+      success: false,
+      resultMessage: "This org's policy does not allow muting alerts.",
+    });
+    expect(stepsOf(state.messages[0], "org1")[0]).toMatchObject({
+      state: "failed",
+      error: "This org's policy does not allow muting alerts.",
+    });
+  });
+
+  it("keeps a confirmation_resolved outcome and detail, and drops an unknown outcome", () => {
+    const state = makeState({ messages: [assistant()] });
+    const frame = {
+      type: "confirmation_resolved",
+      id: "c9",
+      approved: true,
+      outcome: "failed",
+      detail: "OpenObserve did not accept the assistant's approval for this change.",
+      code: "approval_secret_unset",
+    };
+    reduce(state, frame, live());
+    reduce(state, { ...frame, id: "c8", outcome: "exploded" }, live());
+    const [failed, odd] = blocksOf(state).filter((b) => b.type === "approval_result");
+    expect(failed.resolved).toMatchObject({ outcome: "failed", detail: frame.detail });
+    expect(odd.resolved?.outcome).toBeUndefined();
   });
 
   it("keeps a result for a call it never saw as a done step (HT-05 edge)", () => {

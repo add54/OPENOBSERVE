@@ -137,4 +137,29 @@ describe("AssistantActionTimeline", () => {
       "text-status-error-text",
     );
   });
+  it("says a refused change did not happen, with the server's reason, and promises no Undo", async () => {
+    const { wrapper } = mountTimeline([
+      entry({
+        status: "failed",
+        op: "create",
+        resource: { type: "alert", name: "checkout" },
+        reason: "OpenObserve did not accept the assistant's approval for this change.",
+      }),
+    ]);
+    await expand(wrapper);
+    const row = wrapper.get('[data-test="assistant-action-entry-c9:0"]');
+    expect(row.text()).toMatch(
+      /^Couldn't complete this: checkout · OpenObserve did not accept the assistant's approval for this change\. · /,
+    );
+    expect(row.text()).not.toContain("Created");
+    expect(wrapper.find('[data-test="assistant-action-timeline-limits"]').exists()).toBe(false);
+  });
+
+  it("names a refused change without a reason as an error", async () => {
+    const { wrapper } = mountTimeline([entry({ status: "failed" })]);
+    await expand(wrapper);
+    expect(wrapper.get('[data-test="assistant-action-entry-c9:0"]').text()).toMatch(
+      /^Couldn't complete this: checkout-latency-old · error · /,
+    );
+  });
 });

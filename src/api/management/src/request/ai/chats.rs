@@ -29,7 +29,7 @@ use axum::{
 };
 use bytes::Bytes;
 use infra::table::{
-    ai_chat_feedback, ai_chat_imports,
+    ai_approvals, ai_chat_feedback, ai_chat_imports,
     ai_chat_sessions::{self, ListCursor, ListFilter, Model, NO_SEQ, NewImport, STATUS_ACTIVE},
     ai_chat_turns::{
         self, Model as TurnRecord, TURN_CANCELLED, TURN_COMPLETED, TURN_FAILED, TURN_INTERRUPTED,
@@ -143,7 +143,8 @@ pub struct ChatSummary {
     pub active_turn: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_turn_id: Option<String>,
-    /// A hint: the newest turn stored a confirmation request the caller has not answered.
+    /// A hint: the chat waits on a confirmation request or approval card the caller has not
+    /// answered.
     pub pending_approval: bool,
     /// The call id of that request, when it could be read.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1067,8 +1068,13 @@ pub async fn get(
         Err(resp) => return resp,
     };
     let newest = records.last().filter(|r| recent_turn(r, now));
+    let cards = chat_approvals(&org_id, &row.session_id, &user_email).await;
     let pending = pending_approval_in(&events, newest)
-        .filter(|_| unanswered(confirmations_in(&events, newest), answers));
+        .filter(|_| unanswered(confirmations_in(&events, newest), answers))
+        .or_else(|| {
+            waiting_cards(cards.as_deref().unwrap_or_default(), &user_email, now)
+                .remove(&row.session_id)
+        });
     version.pending = pending.is_some();
     let turns = project_turns(&events);
     // Incremental only from a copy older than the watermark whose version we can read.
@@ -1091,11 +1097,17 @@ pub async fn get(
         prepend_imported(&row, &mut turns).await;
     }
     annotate_turns(&mut turns, &records, &feedback);
+    let approvals: Option<Vec<Value>> = cards.map(|rows| rows.iter().map(approval_view).collect());
+    for turn in turns.iter_mut() {
+        openobserve_core::ai_chat::projection::attach_card_outcomes(
+            turn,
+            approvals.as_deref().unwrap_or_default(),
+        );
+    }
     let seed = row
         .seed
         .as_deref()
         .and_then(|s| serde_json::from_str(s).ok());
-    let approvals = chat_approvals(&org_id, &row.session_id, &user_email).await;
     Json(ChatDetailResponse {
         chat: ChatSummary::from(row).with_markers(active.as_ref(), pending.as_ref()),
         state_version: version.to_string(),
@@ -1922,9 +1934,13 @@ fn project_turns(events: &[DurableEvent]) -> Vec<Value> {
 }
 
 /// The approvals OpenObserve stored for the caller's chat, readable on every replica.
-async fn chat_approvals(org_id: &str, session_id: &str, user_email: &str) -> Option<Vec<Value>> {
-    match infra::table::ai_approvals::list_for_session(org_id, session_id, user_email).await {
-        Ok(rows) => Some(rows.iter().map(approval_view).collect()),
+async fn chat_approvals(
+    org_id: &str,
+    session_id: &str,
+    user_email: &str,
+) -> Option<Vec<ai_approvals::Model>> {
+    match ai_approvals::list_for_session(org_id, session_id, user_email).await {
+        Ok(rows) => Some(rows),
         Err(e) => {
             log::warn!("[AI-CHAT] approvals of {org_id}/{session_id} unreadable: {e}");
             None
@@ -1932,7 +1948,7 @@ async fn chat_approvals(org_id: &str, session_id: &str, user_email: &str) -> Opt
     }
 }
 
-fn approval_view(row: &infra::table::ai_approvals::Model) -> Value {
+fn approval_view(row: &ai_approvals::Model) -> Value {
     let parse = |text: &str| serde_json::from_str::<Value>(text).unwrap_or(Value::Null);
     serde_json::json!({
         "id": row.id,
@@ -2012,17 +2028,26 @@ async fn list_pending(
         .iter()
         .map(|(r, _, started)| (r.session_id.clone(), *started))
         .collect();
-    let (pending, answers) = tokio::join!(
+    let (pending, answers, cards) = tokio::join!(
         openobserve_core::ai_chat::pending_confirmations(org_id, &chats),
         super::turn_marks::answers_since(org_id, user_email, &sessions),
+        ai_approvals::list_waiting(org_id, now),
     );
-    Ok(pending?
+    let mut pending: HashMap<String, String> = pending?
         .into_iter()
         .filter(|(session_id, (_, asked))| {
             unanswered(*asked, answers.get(session_id).copied().unwrap_or(0))
         })
         .map(|(session_id, (call, _))| (session_id, call))
-        .collect())
+        .collect();
+    let cards = cards.unwrap_or_else(|e| {
+        log::warn!("[AI-CHAT] cannot read the waiting approvals of {org_id}: {e}");
+        Vec::new()
+    });
+    for (session_id, id) in waiting_cards(&cards, user_email, now) {
+        pending.entry(session_id).or_insert(id);
+    }
+    Ok(pending)
 }
 
 /// The newest turn still waits while it asked more confirmations than the member has answered.
@@ -2096,6 +2121,27 @@ fn pending_approval_in(events: &[DurableEvent], newest: Option<&TurnRecord>) -> 
         .find_map(|e| {
             openobserve_core::ai_chat::projection::delete_confirmation_call(&e.event_type, &e.data)
         })
+}
+
+/// The oldest undecided, unexpired card `user_email` raised in each chat, by session.
+fn waiting_cards(
+    cards: &[ai_approvals::Model],
+    user_email: &str,
+    now: i64,
+) -> HashMap<String, String> {
+    let mut waiting = HashMap::new();
+    let mut open: Vec<&ai_approvals::Model> = cards
+        .iter()
+        .filter(|c| c.user_email == user_email)
+        .filter(|c| c.status == ai_approvals::STATUS_PENDING && c.expires_at > now)
+        .collect();
+    open.sort_by_key(|c| c.created_at);
+    for card in open {
+        waiting
+            .entry(card.session_id.clone())
+            .or_insert_with(|| card.id.clone());
+    }
+    waiting
 }
 
 /// Merges turn records into projected turns (K2) and cuts them as `cut` says (K3).
@@ -3510,6 +3556,45 @@ mod tests {
         assert!(unanswered(confirmations_in(&events, Some(&newest)), 1));
         assert!(!unanswered(confirmations_in(&events, Some(&newest)), 2));
         assert_eq!(confirmations_in(&events, None), 0);
+    }
+
+    #[test]
+    fn any_undecided_unexpired_card_of_the_caller_marks_its_chat_waiting() {
+        let card = |id: &str, session: &str, who: &str, status: &str, created_at: i64| {
+            ai_approvals::Model {
+                id: id.into(),
+                org_id: "acme".into(),
+                session_id: session.into(),
+                user_email: who.into(),
+                tool: Some("UpdateAlert".into()),
+                status: status.into(),
+                scope: None,
+                card: "{}".into(),
+                resolved: None,
+                expires_at: 1_000,
+                created_at,
+                decided_at: None,
+            }
+        };
+        let pending = ai_approvals::STATUS_PENDING;
+        let cards = [
+            card("apr_2", "s1", "alice@acme.io", pending, 20),
+            card("apr_1", "s1", "alice@acme.io", pending, 10),
+            card(
+                "apr_3",
+                "s2",
+                "alice@acme.io",
+                ai_approvals::STATUS_DENIED,
+                10,
+            ),
+            card("apr_4", "s3", "bob@acme.io", pending, 10),
+        ];
+        let waiting = waiting_cards(&cards, "alice@acme.io", 500);
+        assert_eq!(waiting.len(), 1);
+        assert_eq!(waiting["s1"], "apr_1");
+        assert!(waiting_cards(&cards, "alice@acme.io", 1_000).is_empty());
+        let marked = ChatSummary::from(chat_row()).with_markers(None, waiting.get("s1"));
+        assert!(marked.pending_approval && marked.in_progress());
     }
 
     #[test]

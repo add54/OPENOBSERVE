@@ -292,6 +292,18 @@ describe("AssistantMessageActions", () => {
     );
   });
 
+  it("copies a bare position marker as nothing, never a footnote", () => {
+    const copy = {
+      step: () => "",
+      fenceSource: () => null,
+      stamp: null,
+      claim: (id: string) => (id === "call_3" ? "Queried default" : null),
+    };
+    expect(answerMarkdown([{ type: "text", text: "Reset [^2] by peer [^call_3]." }], copy)).toBe(
+      "Reset by peer [1].\n\n1. Queried default",
+    );
+  });
+
   it("serialises steps as a list then the text as written", () => {
     const copy = {
       step: (block: ContentBlock) => String(block.message),

@@ -131,6 +131,12 @@ const STREAMLESS_TOOLS: [&str; 18] = [
     "create_navigation",
 ];
 const TRUNCATED_SUFFIX: &str = " (truncated)";
+// `error_type` of a call that never ran: queued behind a card, or refused by the org's policy.
+const APPROVAL_PENDING: &str = "approval_pending";
+const POLICY_REFUSED: &str = "policy_refused";
+const REFUSED_PREFIX: &str = "Refused by this organization's assistant policy";
+// For the model only; a person reading the refusal gets the text without it.
+const REFUSED_ADVICE: &str = " Tell the user; do not retry.";
 
 /// Tools no projection shows; the sentinels at the end are RCA thread structure.
 pub(crate) const HIDDEN_TOOLS: [&str; 26] = [
@@ -245,6 +251,16 @@ static NONCED_CLOSER: LazyLock<Regex> =
 static LEGACY_OPENER: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^--- (.+?) (?:\(lines \d+-\d+\) )?---$").expect("valid legacy opener")
 });
+// o2-ai's `APPROVAL_MARKER`: the queued result names its card, so a reload can find its outcome.
+static APPROVAL_MARKER: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?s)^This change needs the user's approval\. .* \[approval (apr_[0-9a-f]{20})\]$")
+        .expect("valid approval marker")
+});
+// o2-ai's `CLAIM_MARKER`: a call position or a call id the model cites a step by.
+static CLAIM_MARKER: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\[\^(\d{1,3}|[A-Za-z][A-Za-z0-9]*_[A-Za-z0-9_-]{1,60})\]")
+        .expect("valid claim marker")
+});
 static LEGACY_BLOCK: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?m)^--- (.+?) (?:\(lines \d+-\d+\) )?---\n[\s\S]*?\n--- end ---$")
         .expect("valid legacy block")
@@ -272,6 +288,8 @@ struct StreamState {
     follow_ups: Vec<String>,
     turn_call_ids: Vec<String>,
     step_call_ids: HashSet<String>,
+    /// Inside a fenced code block of the answer, where `[^...]` is code, not a marker.
+    in_code: bool,
 }
 
 impl StreamState {
@@ -297,7 +315,28 @@ impl StreamState {
         if let Some(last) = shown.chars().next_back() {
             self.shown_tail = Some(last);
         }
-        shown
+        self.rewrite_claim_markers(&shown)
+    }
+
+    /// Markers naming a visible step keep its call id, others are dropped, as o2-ai streams them.
+    fn rewrite_claim_markers(&mut self, text: &str) -> String {
+        let mut out = Vec::new();
+        for (index, segment) in text.split(CODE_FENCE).enumerate() {
+            if index > 0 {
+                self.in_code = !self.in_code;
+            }
+            if self.in_code {
+                out.push(segment.to_string());
+                continue;
+            }
+            let rewritten = CLAIM_MARKER.replace_all(segment, |m: &regex::Captures<'_>| {
+                self.step_call_id(&m[1])
+                    .map(|call_id| format!("[^{call_id}]"))
+                    .unwrap_or_default()
+            });
+            out.push(rewritten.into_owned());
+        }
+        out.join(CODE_FENCE)
     }
 
     fn next_fence(&self, text: &str) -> Option<(usize, &'static str)> {
@@ -1061,6 +1100,40 @@ pub fn attach_decisions(turn: &mut Value, decisions: &[Value]) {
     }
 }
 
+/// Settles each queued call's result frame with the outcome its stored card (`approval_view`)
+/// records.
+pub fn attach_card_outcomes(turn: &mut Value, cards: &[Value]) {
+    let Some(Value::Array(frames)) = turn.get_mut("frames") else {
+        return;
+    };
+    for frame in frames.iter_mut().filter_map(Value::as_object_mut) {
+        if frame.get("error_type").and_then(Value::as_str) != Some(APPROVAL_PENDING) {
+            continue;
+        }
+        let id = frame.get("approval_id").and_then(Value::as_str);
+        let Some(card) = cards
+            .iter()
+            .find(|c| id.is_some() && c["id"].as_str() == id)
+        else {
+            continue;
+        };
+        let Some((success, error_type, message)) = card_outcome(card) else {
+            continue;
+        };
+        let tool = frame
+            .get("tool")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let message = message.unwrap_or_else(|| format!("{tool} completed successfully"));
+        frame.insert("success".into(), success.into());
+        frame.insert("message".into(), redact_internal_details(&message).into());
+        match error_type {
+            Some(error_type) => frame.insert("error_type".into(), error_type.into()),
+            None => frame.shift_remove("error_type"),
+        };
+    }
+}
+
 /// Rebuilds a query builder turn's end frame, which o2-ai only streams and never stores.
 pub fn attach_query_frame(turn: &mut Value) {
     let Some(Value::Array(frames)) = turn.get_mut("frames") else {
@@ -1689,8 +1762,20 @@ fn format_tool_result_event(
     event.insert("type".into(), Value::String("tool_result".into()));
     event.insert("tool".into(), Value::String(actual_tool.clone()));
     event.insert("success".into(), Value::Bool(!is_error));
+    if let Some(unrun) = unrun_call(result, &response_body).filter(|_| !is_error) {
+        event.insert("success".into(), Value::Bool(false));
+        event.extend(unrun);
+        return Some(scrub_event_text(event));
+    }
     if is_error {
         let (message, error_type) = parse_error(&response_body, Some(result));
+        let message = match message {
+            Value::String(text) => Value::String(
+                text.strip_suffix(REFUSED_ADVICE)
+                    .map_or_else(|| text.clone(), str::to_string),
+            ),
+            other => other,
+        };
         event.insert("error_type".into(), Value::String(error_type));
         event.insert("message".into(), message);
     } else {
@@ -1715,6 +1800,58 @@ fn format_tool_result_event(
         event.insert("call_args".into(), Value::Object(args.clone()));
     }
     Some(scrub_event_text(event))
+}
+
+/// Frame fields of a completed call the approval guard stopped; it must not read as success.
+fn unrun_call(result: &Map<String, Value>, response_body: &Value) -> Option<Map<String, Value>> {
+    let raw = match response_body {
+        Value::String(text) => Some(text.as_str()),
+        _ => result.get("output").and_then(Value::as_str),
+    };
+    let text = raw.unwrap_or_default().trim();
+    let mut fields = Map::new();
+    if let Some(queued) = APPROVAL_MARKER.captures(text) {
+        fields.insert("error_type".into(), APPROVAL_PENDING.into());
+        fields.insert("approval_id".into(), queued[1].into());
+        fields.insert(
+            "message".into(),
+            "Waiting for your approval. Nothing has changed yet.".into(),
+        );
+    } else if text.starts_with(REFUSED_PREFIX) {
+        fields.insert("error_type".into(), POLICY_REFUSED.into());
+        let message = text.strip_suffix(REFUSED_ADVICE).unwrap_or(text);
+        fields.insert("message".into(), message.into());
+    } else {
+        return None;
+    }
+    Some(fields)
+}
+
+/// `(success, error_type, message)` of a decided card; `None` while it still waits.
+fn card_outcome(card: &Value) -> Option<(bool, Option<&'static str>, Option<String>)> {
+    let status = card["status"].as_str().unwrap_or_default();
+    let resolved = &card["resolved"];
+    let detail = resolved["detail"].as_str().map(str::to_string);
+    let outcome = resolved["outcome"].as_str().unwrap_or(status);
+    match (status, outcome) {
+        ("pending", _) => None,
+        ("expired", _) => Some((
+            false,
+            Some("approval_expired"),
+            Some("The approval expired. Nothing was changed.".into()),
+        )),
+        ("approved", "approved") => Some((true, None, None)),
+        ("approved", _) => Some((
+            false,
+            Some("approval_failed"),
+            Some(detail.unwrap_or_else(|| "The change could not be applied.".into())),
+        )),
+        _ => Some((
+            false,
+            Some("approval_denied"),
+            Some(detail.unwrap_or_else(|| "Declined. Nothing was changed.".into())),
+        )),
+    }
 }
 
 fn format_exec_event(
@@ -2911,6 +3048,72 @@ mod tests {
     }
 
     #[test]
+    fn a_reloaded_queued_or_refused_write_never_reads_as_completed() {
+        let queued = "This change needs the user's approval. It was shown to them as a card. \
+                      [approval apr_0123456789abcdef0123]";
+        let result = |text: &str| {
+            let mut m = Map::new();
+            m.insert("output".into(), text.into());
+            m
+        };
+        let event = format_tool_result_event("UpdateAlert", &result(queued), false, None).unwrap();
+        assert_eq!(event["success"], false);
+        assert_eq!(event["error_type"], APPROVAL_PENDING);
+        assert_eq!(event["approval_id"], "apr_0123456789abcdef0123");
+        let refused = format!("{REFUSED_PREFIX}: writes are off.{REFUSED_ADVICE}");
+        let event =
+            format_tool_result_event("UpdateAlert", &result(&refused), false, None).unwrap();
+        assert_eq!(
+            (&event["success"], &event["error_type"], &event["message"]),
+            (
+                &json!(false),
+                &json!(POLICY_REFUSED),
+                &json!(format!("{REFUSED_PREFIX}: writes are off."))
+            )
+        );
+
+        let frame = |id: &str| {
+            json!({"type": "tool_result", "tool": "UpdateAlert", "success": false,
+                   "error_type": APPROVAL_PENDING, "approval_id": id, "message": "Waiting"})
+        };
+        let mut turn = json!({"frames": [frame("apr_d"), frame("apr_f"), frame("apr_ok"), frame("apr_x"), frame("apr_p")]});
+        let cards = [
+            json!({"id": "apr_d", "status": "denied", "resolved": {"outcome": "denied", "detail": "Declined. Nothing was changed."}}),
+            json!({"id": "apr_f", "status": "approved", "resolved": {"outcome": "failed", "detail": "Alert not found"}}),
+            json!({"id": "apr_ok", "status": "approved", "resolved": {"outcome": "approved"}}),
+            json!({"id": "apr_x", "status": "expired", "resolved": null}),
+            json!({"id": "apr_p", "status": "pending", "resolved": null}),
+        ];
+        attach_card_outcomes(&mut turn, &cards);
+        let seen: Vec<(bool, &str, &str)> = turn["frames"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|f| {
+                (
+                    f["success"].as_bool().unwrap(),
+                    f["error_type"].as_str().unwrap_or(""),
+                    f["message"].as_str().unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            seen,
+            [
+                (false, "approval_denied", "Declined. Nothing was changed."),
+                (false, "approval_failed", "Alert not found"),
+                (true, "", "UpdateAlert completed successfully"),
+                (
+                    false,
+                    "approval_expired",
+                    "The approval expired. Nothing was changed."
+                ),
+                (false, APPROVAL_PENDING, "Waiting"),
+            ]
+        );
+    }
+
+    #[test]
     fn decisions_reattach_after_the_request_they_answer() {
         let mut turn = json!({"frames": [
             {"type": "confirmation_required", "id": "apr_1", "tool": "o2_delete"},
@@ -3102,6 +3305,32 @@ mod tests {
             evidence[1],
             json!({"text": "beyond the calls of this turn", "kind": "inferred"})
         );
+    }
+
+    #[test]
+    fn a_reopened_answer_cites_steps_by_call_id_like_the_live_one() {
+        let first = last_frames(&session_answering("Done.", "sre", Value::Null));
+        let step = first
+            .iter()
+            .find(|f| f["type"] == "tool_call")
+            .and_then(|f| f["call_id"].as_str())
+            .unwrap()
+            .to_string();
+        let answer = format!(
+            "The pool is full [^{step}]. Not [^99] or [^zz_unknown].\n```\nre.sub(r\"[^1]\", x)\n```\n"
+        );
+        let text = answer_text(&last_frames(&session_answering(
+            &answer,
+            "sre",
+            Value::Null,
+        )));
+        let (prose, code) = text.split_once(CODE_FENCE).unwrap();
+        assert!(prose.contains(&format!("[^{step}]")), "{text}");
+        assert!(
+            !prose.contains("[^99]") && !prose.contains("zz_unknown"),
+            "{text}"
+        );
+        assert!(code.contains("[^1]"), "{text}");
     }
 
     #[test]

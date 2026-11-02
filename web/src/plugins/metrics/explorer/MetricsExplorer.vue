@@ -1471,12 +1471,21 @@ export default defineComponent({
     const visualizeMount = ref(0);
     // An assistant link applies its query and window but never runs them.
     const isAssistantLink = (q: Record<string, any>) => isAssistantV2() && q.type === AI_CHAT_QUERY;
+    // `type` is also the grid's filter key, so the sync must carry the marker or a reload and Back would auto-run.
+    const linkMarker = (q: Record<string, any>) =>
+      isAssistantLink(q) ? { type: AI_CHAT_QUERY } : {};
+    // Each link's nonce gets its own held open, even when its chart blob is the one already showing.
+    let seededLinkNonce: string | null = null;
+    // The URL blob last seeded; re-encoding the panel can differ from it, which must not read as another chart.
+    let seededBlob = "";
     const seedVisualizeFromUrl = (q: Record<string, any>) => {
       if (!q.metrics_data) return;
       const blob = decodeMetricsConfig(q.metrics_data);
       if (!blob?.data) return;
       visualizeSeed.value = blob.data;
       visualizeSeedHeld.value = isAssistantLink(q);
+      seededBlob = String(q.metrics_data);
+      if (isAssistantLink(q)) seededLinkNonce = String(q.t ?? "");
     };
     const onVisualizeSeedConsumed = () => {
       visualizeSeed.value = null;
@@ -1888,7 +1897,7 @@ export default defineComponent({
     const syncUrlState = () => {
       const query: Record<string, any> = { ...route.query };
       for (const key of MANAGED_PARAM_KEYS) delete query[key];
-      Object.assign(query, managedFromState());
+      Object.assign(query, linkMarker(route.query), managedFromState());
 
       const changed =
         Object.keys(query).some((k) => String(query[k]) !== String(route.query[k] ?? "")) ||
@@ -1938,6 +1947,7 @@ export default defineComponent({
       const blob = mode.value === "visualize" ? visualizeBlob.value : "";
       if (String(blob) === String(route.query.metrics_data ?? "")) return;
       writtenBlob = blob;
+      seededBlob = "";
 
       const query: Record<string, any> = { ...route.query };
       if (blob) query.metrics_data = blob;
@@ -1987,12 +1997,14 @@ export default defineComponent({
       const ownWrite = !!blobIn && blobIn === writtenBlob;
       // The marker is spent once its own update lands, or Back to that blob later would be ignored.
       if (ownWrite) writtenBlob = "";
+      const newLink =
+        isAssistantLink(route.query) && String(route.query.t ?? "") !== seededLinkNonce;
+      const otherChart = !ownWrite && blobIn !== seededBlob && blobIn !== visualizeBlob.value;
       if (
-        !ownWrite &&
         mode.value === "visualize" &&
         route.query.mode === "visualize" &&
         blobIn &&
-        blobIn !== visualizeBlob.value
+        (newLink || otherChart)
       ) {
         seedVisualizeFromUrl(route.query as Record<string, any>);
         visualizeMount.value += 1;
@@ -2004,7 +2016,10 @@ export default defineComponent({
         if (v != null) incoming[key] = String(v);
       }
       const current: Record<string, string> = {};
-      for (const [key, v] of Object.entries(managedFromState())) {
+      for (const [key, v] of Object.entries({
+        ...linkMarker(route.query),
+        ...managedFromState(),
+      })) {
         current[key] = String(v);
       }
       if (isEqual(incoming, current)) return;

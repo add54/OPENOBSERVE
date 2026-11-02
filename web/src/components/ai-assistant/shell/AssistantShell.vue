@@ -511,7 +511,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
             v-if="strip?.review"
             variant="outline"
             size="sm"
-            :aria-label="t('assistant.strip.review')"
+            :aria-label="reviewName"
             class="shrink-0 max-md:min-h-11 max-md:w-full pointer-coarse:min-h-11"
             data-test="assistant-strip-review"
             @click="reviewRequest"
@@ -1227,12 +1227,18 @@ const consentCard = computed(() =>
 
 const reviewClock = ref(Date.now());
 let reviewTimer: ReturnType<typeof setInterval> | null = null;
+const reviewName = computed(() =>
+  approvalCard.value?.kind === "question"
+    ? t("assistant.notice.decision")
+    : t("assistant.strip.review"),
+);
 const reviewLabel = computed(() => {
   const until = approvalCard.value?.expiresAt;
-  if (typeof until !== "number") return t("assistant.strip.review");
-  return t("assistant.strip.reviewExpires", {
-    time: raw(approvalClock(until - reviewClock.value)),
-  });
+  if (typeof until !== "number") return reviewName.value;
+  const time = raw(approvalClock(until - reviewClock.value));
+  return approvalCard.value?.kind === "question"
+    ? t("assistant.turn.withElapsed", { status: reviewName.value, elapsed: time })
+    : t("assistant.strip.reviewExpires", { time });
 });
 
 // A full phone sheet covers the notice, so the waiting request becomes one row under the bar.

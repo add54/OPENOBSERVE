@@ -143,9 +143,20 @@ const anotherLink = ref(false);
 const org = computed(
   () => view.session.value?.org ?? vuex.state.selectedOrganization?.identifier ?? "",
 );
+const running = computed(() => {
+  const turn = view.turn.value;
+  return !!turn && turn.state !== "idle" && !isTerminal(turn);
+});
+// A chat's row is stored with its first finished turn, so asking sooner only earns a 404.
+const stored = computed(() => {
+  const session = view.session.value;
+  if (!session || session.record.serverBacked) return true;
+  const answers = session.messages.filter((message) => message.role === "assistant").length;
+  return answers > (running.value ? 1 : 0);
+});
 const sharesRead = useQuery(() =>
   Object.assign(chatSharesQuery(org.value, props.sid), {
-    enabled: !!org.value && !!props.sid && capability.value.persistence,
+    enabled: !!org.value && !!props.sid && capability.value.persistence && stored.value,
   }),
 );
 const shares = computed<ShareView[]>(() => {
@@ -155,10 +166,6 @@ const shares = computed<ShareView[]>(() => {
 });
 const current = computed<ShareView | null>(() => shares.value[0] ?? null);
 const shared = computed(() => shares.value.length > 0);
-const running = computed(() => {
-  const turn = view.turn.value;
-  return !!turn && turn.state !== "idle" && !isTerminal(turn);
-});
 const known = computed(() =>
   knownAttachments(org.value, props.sid, view.session.value ? view.messages.value : undefined),
 );

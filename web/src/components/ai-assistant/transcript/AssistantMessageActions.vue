@@ -229,6 +229,8 @@ const COMMENT_PREFIX: Record<string, string> = { sql: "--", promql: "#" };
 
 const CLAIM_MARKER = /\[\^([A-Za-z0-9_-]{1,64})\]/g;
 
+const POSITION_MARKER = /[ \t]*\[\^\d+\]/g;
+
 /** An answer as Markdown: its steps as a list, its text with query fences sourced, then the stamp (EB-09 AC 6). */
 export function answerMarkdown(blocks: ContentBlock[], copy: AnswerMarkdownCopy): string {
   const steps = blocks.filter((block) => block.type === "tool_call" && block.tool).map(copy.step);
@@ -253,7 +255,7 @@ export function answerMarkdown(blocks: ContentBlock[], copy: AnswerMarkdownCopy)
 }
 
 function withClaims(line: string, numbers: Map<string, number>): string {
-  return line.replace(CLAIM_MARKER, (_all, id: string) => {
+  return line.replace(POSITION_MARKER, "").replace(CLAIM_MARKER, (_all, id: string) => {
     if (!numbers.has(id)) numbers.set(id, numbers.size + 1);
     return `[${numbers.get(id)}]`;
   });

@@ -479,6 +479,32 @@ describe("states (`40` §1.3)", () => {
     expect(session.composer.mode).toBe("compose");
   });
 
+  it("keeps Send, never Stop, in reply mode while the turn waits on the card", async () => {
+    const { wrapper, store, sid, textarea } = setup();
+    const session = store.state.sessions[sid];
+    session.pendingApproval = { id: "c1" } as PendingApproval;
+    session.turn = { state: "awaiting_approval", callId: "c1" };
+    const stop = vi.spyOn(store, "stop").mockResolvedValue();
+    const decide = vi.spyOn(store, "decideApproval").mockImplementation(async () => {
+      session.pendingApproval = null;
+      return {} as never;
+    });
+    store.startReply(sid, "c1");
+    await flushPromises();
+    expect(wrapper.find('[data-test="assistant-stop"]').exists()).toBe(false);
+    await type(textarea(), "use staging");
+    await wrapper.get('[data-test="assistant-send"]').trigger("click");
+    await flushPromises();
+    expect(decide).toHaveBeenCalledWith(
+      sid,
+      { approved: false, reason: "reply", reply: "use staging" },
+      "c1",
+    );
+    expect(stop).not.toHaveBeenCalled();
+    await flushPromises();
+    expect(wrapper.find('[data-test="assistant-stop"]').exists()).toBe(true);
+  });
+
   it("keeps a refused reply in the box and says why", async () => {
     const { store, sid, textarea, wrapper } = setup();
     const session = store.state.sessions[sid];

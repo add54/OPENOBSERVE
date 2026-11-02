@@ -557,6 +557,7 @@ function keptOutcome(value: any): ApprovalOutcome | null {
     ...(decision && { decision }),
     ...(isNumber(value.httpStatus) && { httpStatus: value.httpStatus }),
     ...(typeof value.by === "string" && { by: value.by.slice(0, 200) }),
+    ...(typeof value.reason === "string" && value.reason && { reason: value.reason.slice(0, 500) }),
   };
 }
 
@@ -627,6 +628,7 @@ function keptEntry(value: any): ActionLedgerEntry[] {
       status: value.status,
       undoable: value.undoable === true,
       at: value.at,
+      ...(text(value.reason, 500) && { reason: text(value.reason, 500) }),
       ...(isNumber(value.undoneAt) && { undoneAt: value.undoneAt }),
       // An undo still on its way when the page went may have restored the object, so it is never offered again.
       ...((value.undoing === true || value.undoUnconfirmed === true) && { undoUnconfirmed: true }),

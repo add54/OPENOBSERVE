@@ -309,7 +309,7 @@ describe("AssistantHeaderButton light", () => {
     await flushPromises();
     expect(button(wrapper).attributes("data-state")).toBe("needs_you");
     expect(button(wrapper).attributes("aria-label")).toBe("O2 Assistant, needs you, 1 waiting");
-    expect(tooltip(wrapper)).toBe("Waiting for your approval");
+    expect(tooltip(wrapper)).toBe("Needs you");
     expect(wrapper.find('[data-test="assistant-header-status-light"]').text()).toBe("1");
   });
 

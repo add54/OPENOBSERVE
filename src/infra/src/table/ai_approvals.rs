@@ -352,6 +352,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_card_holds_a_run_slot_only_until_it_is_decided_or_expires() {
+        let db = db().await;
+        insert_pending_with(&db, &card("apr_1"), NOW).await.unwrap();
+        insert_pending_with(&db, &card("apr_2"), NOW).await.unwrap();
+        let waiting = |at| list_waiting_with(&db, ORG, at);
+        assert_eq!(waiting(NOW).await.unwrap().len(), 2);
+        decide_with(&db, ORG, "apr_1", &APPROVE, NOW).await.unwrap();
+        let open = waiting(NOW).await.unwrap();
+        assert_eq!(open.len(), 1);
+        assert_eq!(open[0].id, "apr_2");
+        assert!(
+            list_waiting_with(&db, "globex", NOW)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        // Unpurged rows stay `pending`, so the deadline itself must free the slot.
+        let row = get_with(&db, ORG, "apr_2").await.unwrap().unwrap();
+        assert_eq!(row.status, STATUS_PENDING);
+        assert!(waiting(row.expires_at).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
     async fn the_purge_expires_unanswered_cards_and_drops_old_decisions() {
         let db = db().await;
         insert_pending_with(&db, &card("apr_1"), NOW).await.unwrap();

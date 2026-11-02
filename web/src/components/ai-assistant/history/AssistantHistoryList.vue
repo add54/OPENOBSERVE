@@ -437,7 +437,6 @@ export interface AssistantHistoryListProps {
   windowSid?: Sid | null;
   /** Where a row opens: the rail routes to the full view, the others open in their container. */
   container: Container;
-  /** A window's own verdict from its geometry; its 2 px of borders would read 24 rem as narrower. */
   narrow?: boolean;
 }
 

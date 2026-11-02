@@ -264,6 +264,14 @@ describe("markdown.ts strict profile", () => {
     expect(htmlOf(render("Cart failed [^cal", "open").parts)).not.toContain("[^cal");
   });
 
+  it("drops a bare position marker that names no step, and keeps the call ids around it", () => {
+    const done = render("Cart returned 502 [^2] and [^call_1].");
+    expect(done.claims).toEqual(["call_1"]);
+    const html = htmlOf(done.parts);
+    expect(html).not.toContain("[^");
+    expect(html).toContain('502 and<wbr data-claim="0">.');
+  });
+
   it("leaves an empty slot against the cited word, never a space before punctuation", () => {
     const done = render("Cart returned 502 [^call_3], then [^call_1].");
     const html = htmlOf(done.parts);

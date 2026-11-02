@@ -24,7 +24,7 @@ export type TurnState =
   | { state: "responding.thinking" }
   | { state: "responding.writing" }
   | { state: "running_tool"; tool: string; target: string | null; callId: string }
-  | { state: "awaiting_approval"; callId: string }
+  | { state: "awaiting_approval"; callId: string; question?: boolean }
   | { state: "awaiting_consent" }
   | { state: "reconnecting"; attempt: number }
   | { state: "stopping" }

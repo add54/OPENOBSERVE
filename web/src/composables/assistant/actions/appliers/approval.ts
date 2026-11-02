@@ -218,16 +218,25 @@ function detailOf(
   }
   // A refusal of the server's own is never a success, and an answer with no rows confirms nothing.
   const rows = response.results;
+  const said = response.resolved?.outcome;
+  const reason =
+    said && said !== "approved" ? text(response.resolved?.detail).slice(0, MAX_MESSAGE_CHARS) : "";
   const refused =
+    said === "failed" ||
+    said === "denied" ||
     response.approved === false ||
     response.replied === false ||
     (!Array.isArray(rows) && response.deleted === false);
-  if (refused) return { outcome: { state: "failed", at, decision } };
+  const result = approvalResultOf(card, response, env.currentUser(), at);
+  if (refused)
+    return {
+      outcome: { state: "failed", at, decision, ...(reason && { reason }) },
+      ...(result && said && { result }),
+    };
   if (Array.isArray(rows) && rows.length === 0)
     return { outcome: { state: "unconfirmed", at, decision } };
-  const result = approvalResultOf(card, response, env.currentUser(), at);
-  const state = result ? result.status : "approved";
-  return { outcome: { state, at, decision }, ...(result && { result }) };
+  const state = result ? result.status : said === "partial" ? "partial" : "approved";
+  return { outcome: { state, at, decision, ...(reason && { reason }) }, ...(result && { result }) };
 }
 
 function itemOf(raw: unknown, card: Pick<ApprovalBlockData, "targets">): ApprovalResultItem {
@@ -269,6 +278,7 @@ function appendLedger(
     status: item.status === "done" ? "done" : "failed",
     undoable: item.status === "done" && item.undoable === true,
     at: result.resolvedAt,
+    ...(item.status !== "done" && item.message && { reason: item.message }),
   }));
   const known = new Set(entries.map((entry) => entry.id));
   session.ledger = [...session.ledger.filter((e) => !known.has(e.id)), ...entries].slice(

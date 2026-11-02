@@ -613,7 +613,8 @@ const state = computed(() => {
   return hasContent.value ? "draft" : "empty";
 });
 
-const showStop = computed(() => running.value && !elsewhere.value);
+// The reply and Other answer rows send while the turn waits, so Send keeps its place there.
+const showStop = computed(() => running.value && !elsewhere.value && !replying.value);
 
 // After 30 s without a frame Stop is the one emphasised control (HT-01 AC 3); the clock runs only while a turn does.
 const clock = ref(Date.now());

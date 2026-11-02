@@ -106,6 +106,8 @@ export interface ConfirmResponse {
   expires_at?: number;
   user_extends_left?: number;
   background_extends_left?: number;
+  /** What the decision came to; older servers send no `resolved`. */
+  resolved?: { outcome?: string; detail?: string; code?: string } | null;
 }
 
 /** The restored object, when the server's action ledger can undo an entry. */
