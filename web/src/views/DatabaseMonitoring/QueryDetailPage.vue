@@ -1055,7 +1055,32 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
                 <span class="tabular-nums">{{ formatNs(endpoint.p95_ns) }}</span>
               </template>
               <template #cell-actions="{ row: endpoint }">
+                <OTooltip
+                  v-if="tracesLock.locked.value"
+                  side="left"
+                  :content="tracesLock.lockedReason.value"
+                >
+                  <span class="inline-flex">
+                    <OButton
+                      variant="ghost"
+                      size="icon-sm"
+                      disabled
+                      :aria-label="t('dbm.detail.viewTraces')"
+                      :data-test="`dbm-detail-endpoint-traces-${endpoint.rowKey}`"
+                    >
+                      <template #icon-left>
+                        <OIcon
+                          name="lock"
+                          class="text-icon-locked"
+                          size="sm"
+                          :data-test="`dbm-detail-endpoint-traces-lock-${endpoint.rowKey}`"
+                        />
+                      </template>
+                    </OButton>
+                  </span>
+                </OTooltip>
                 <OButton
+                  v-else
                   variant="ghost"
                   size="icon-sm"
                   icon-left="open-in-new"
@@ -1090,7 +1115,10 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
             </template>
 
             <div v-if="samples.length" class="h-50 w-full px-3">
-              <ChartRenderer :data="scatterData" @click="onSampleClick" />
+              <ChartRenderer
+                :data="scatterData"
+                v-on="tracesLock.locked.value ? {} : { click: onSampleClick }"
+              />
             </div>
 
             <OTable
@@ -1104,7 +1132,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
               :page-size="10"
               table-id="dbm-query-samples"
               data-test="dbm-detail-samples-table"
-              @row-click="openSampleTrace"
+              v-on="tracesLock.locked.value ? {} : { rowClick: openSampleTrace }"
             >
               <template #cell-timestamp="{ row: sample }">
                 <span class="tabular-nums">{{ formatClock(sample.timestamp) }}</span>
@@ -1122,7 +1150,32 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
                 <span v-else class="text-text-muted">{{ raw("—") }}</span>
               </template>
               <template #cell-actions="{ row: sample }">
+                <OTooltip
+                  v-if="tracesLock.locked.value"
+                  side="left"
+                  :content="tracesLock.lockedReason.value"
+                >
+                  <span class="inline-flex">
+                    <OButton
+                      variant="ghost"
+                      size="icon-sm"
+                      disabled
+                      :aria-label="t('dbm.detail.viewTrace')"
+                      :data-test="`dbm-detail-sample-trace-${sample.rowKey}`"
+                    >
+                      <template #icon-left>
+                        <OIcon
+                          name="lock"
+                          class="text-icon-locked"
+                          size="sm"
+                          :data-test="`dbm-detail-sample-trace-lock-${sample.rowKey}`"
+                        />
+                      </template>
+                    </OButton>
+                  </span>
+                </OTooltip>
                 <OButton
+                  v-else
                   variant="ghost"
                   size="icon-sm"
                   icon-left="open-in-new"
@@ -1219,6 +1272,7 @@ import OTabs from "@/lib/navigation/Tabs/OTabs.vue";
 import OSelect from "@/lib/forms/Select/OSelect.vue";
 import type { SelectModelValue, SelectOption } from "@/lib/forms/Select/OSelect.types";
 import OTooltip from "@/lib/overlay/Tooltip/OTooltip.vue";
+import { useLicenseLock } from "@/composables/useFeatureLock";
 import dbMonitoringService, {
   type EndpointRow,
   type ErrorCodeCount,
@@ -1331,6 +1385,7 @@ const { t } = useI18nTyped();
 const store = useStore();
 const route = useRoute();
 const router = useRouter();
+const tracesLock = useLicenseLock("traces");
 const { getStreams } = useStreams(t);
 
 // This page is a route root, so MainLayout's `@sendToAiChat` binding is on it
@@ -3048,6 +3103,7 @@ const errorMessage = (err: unknown): string =>
 
 /** The traces route hydrates from `stream`/`filter`/`from`/`to` query params. */
 const openTraces = (filter: string) => {
+  if (tracesLock.locked.value) return;
   router
     .push({
       name: "traces",

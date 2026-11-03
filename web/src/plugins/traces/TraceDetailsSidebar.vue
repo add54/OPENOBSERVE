@@ -205,8 +205,21 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
           <!-- View Logs Button -->
           <span v-if="parentMode === 'standalone'" class="shrink-0">
-            <!-- Single button with wrapper for tooltip functionality -->
-            <span class="inline-block" tabindex="0">
+            <OTooltip v-if="logsLocked" :content="logsLockedReason">
+              <span class="inline-flex">
+                <OButton
+                  variant="outline"
+                  size="xs"
+                  class="h-full text-xs!"
+                  disabled
+                  icon-left="lock"
+                  data-test="trace-details-sidebar-header-toolbar-view-logs-btn"
+                >
+                  {{ t("traces.viewLogs") }}
+                </OButton>
+              </span>
+            </OTooltip>
+            <span v-else class="inline-block" tabindex="0">
               <OButton
                 variant="outline"
                 size="xs"
@@ -1326,6 +1339,7 @@ export default defineComponent({
     );
     const { locked: profilingLocked, lockedReason: profilingLockedReason } =
       useLicenseLock("continuous_profiling");
+    const { locked: logsLocked, lockedReason: logsLockedReason } = useLicenseLock("logs");
 
     const activeTabModel = computed({
       get: () => props.activeTab,
@@ -1608,6 +1622,7 @@ export default defineComponent({
 
     // Check if View Logs button should be disabled
     const isViewLogsDisabled = computed(() => {
+      if (logsLocked.value) return true;
       // Enterprise loading state
       if (config.isEnterprise === "true" && correlationLoading.value) {
         return true;
@@ -1623,6 +1638,7 @@ export default defineComponent({
 
     // Get tooltip content based on disabled state
     const viewLogsTooltipContent = computed(() => {
+      if (logsLocked.value) return logsLockedReason.value;
       // Enterprise loading state
       if (config.isEnterprise === "true" && correlationLoading.value) {
         return t("correlation.loadingCorrelation");
@@ -2899,6 +2915,8 @@ export default defineComponent({
       isDarkMode,
       isViewLogsDisabled,
       viewLogsTooltipContent,
+      logsLocked,
+      logsLockedReason,
       serviceIconUrl,
       getImageURL,
       copyContentToClipboard,

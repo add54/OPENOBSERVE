@@ -515,17 +515,34 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
                 class="w-44!"
               />
               <span class="traces-view-logs-btn ps-1">
-                <!-- Single button with wrapper for tooltip functionality -->
-                <span class="inline-block" tabindex="0">
+                <OTooltip v-if="logsLocked" :content="logsLockedReason">
+                  <span class="inline-flex">
+                    <OButton
+                      data-test="trace-details-view-logs-btn"
+                      variant="outline"
+                      size="sm"
+                      class="h-8! text-xs font-normal!"
+                      disabled
+                      icon-left="lock"
+                    >
+                      {{
+                        searchObj.meta.redirectedFromLogs
+                          ? t("traces.backToLogs")
+                          : t("traces.viewLogs")
+                      }}
+                    </OButton>
+                  </span>
+                </OTooltip>
+                <span v-else class="inline-block" tabindex="0">
                   <OButton
                     data-test="trace-details-view-logs-btn"
                     variant="outline"
                     size="sm"
                     class="h-8! text-xs font-normal!"
+                    icon-left="search"
                     :disabled="isViewLogsDisabled"
                     @click="redirectToLogs"
                   >
-                    <template #icon-left><OIcon name="search" size="xs" /></template>
                     {{
                       searchObj.meta.redirectedFromLogs
                         ? t("traces.backToLogs")
@@ -924,6 +941,19 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
         {{ t("traces.fetchingTrace") }}
       </div>
     </div>
+    <div
+      v-else-if="licenseLockedView"
+      class="flex min-h-0 flex-1 flex-col"
+      data-test="trace-details-license-locked"
+    >
+      <FeatureLockExempt v-if="showBackButton" class="shrink-0">
+        <OPageHeader
+          :title="t('menu.traces')"
+          :back="{ onClick: handleBackOrClose, dataTest: 'trace-details-back-btn' }"
+        />
+      </FeatureLockExempt>
+      <LicenseDeniedState :features="['traces']" />
+    </div>
 
     <!-- Filters Sidebar -->
     <ODrawer
@@ -998,6 +1028,8 @@ import {
 import { cloneDeep } from "lodash-es";
 import ShareButton from "@/components/common/ShareButton.vue";
 import OPageHeader from "@/lib/core/PageHeader/OPageHeader.vue";
+import FeatureLockExempt from "@/components/common/FeatureLockExempt.vue";
+import LicenseDeniedState from "@/components/common/LicenseDeniedState.vue";
 import OTag from "@/lib/core/Badge/OTag.vue";
 import useTraces from "@/composables/useTraces";
 import TraceDetailsSidebar from "./TraceDetailsSidebar.vue";
@@ -1047,6 +1079,7 @@ import { spanWindowUs, waterfallAxisSpans } from "@/utils/rum/traceWindow";
 import useResizer from "@/composables/useResizer";
 import useSmartBack from "@/composables/useSmartBack";
 import { copyToClipboard } from "@/utils/clipboard";
+import { licenseDeniedFeatures } from "@/utils/featureGate";
 import { raw, useI18nTyped, type I18nText } from "@/types/i18n";
 import useStreams from "@/composables/useStreams";
 import useRumSpanBuilder, { hasDanglingParent } from "@/composables/rum/useRumSpanBuilder";
@@ -1299,6 +1332,8 @@ export default defineComponent({
   components: {
     ShareButton,
     OPageHeader,
+    FeatureLockExempt,
+    LicenseDeniedState,
     OTag,
     TraceDetailsSidebar,
     TraceTree,
@@ -1351,6 +1386,9 @@ export default defineComponent({
       buildQueryDetails,
     } = useTraces();
     const { locked: correlationLocked } = useLicenseLock("correlation");
+    const { locked: logsLocked, lockedReason: logsLockedReason } = useLicenseLock("logs");
+    const { locked: tracesLocked } = useLicenseLock("traces");
+    const licenseLockedView = computed(() => props.mode !== "embedded" && tracesLocked.value);
 
     const { loadKeyFields } = useServiceCorrelation();
 
@@ -1639,6 +1677,7 @@ export default defineComponent({
 
     // Check if View Logs button should be disabled
     const isViewLogsDisabled = computed(() => {
+      if (logsLocked.value) return true;
       // In non-enterprise mode with visible log stream selector, disable when no streams are selected
       return (
         config.isEnterprise !== "true" &&
@@ -2277,6 +2316,8 @@ export default defineComponent({
         return;
       }
 
+      // The route-locked page shows its locked view; the details call would only 403.
+      if (licenseLockedView.value) return;
       // Fetch from API — standalone mode, or embedded with no pre-fetched spans
       await loadLogStreams();
       const timeRange = effectiveTimeRange.value;
@@ -2549,6 +2590,8 @@ export default defineComponent({
         analytics.track("trace_details_loaded", { mode: props.mode });
       } catch (error) {
         if (generation !== loadGeneration) return;
+        // The top bar explains a license denial; redirecting would leave the locked page.
+        if (licenseDeniedFeatures(error) !== null) return;
         // A 401 is the expired session the global handler is already logging the user out of.
         if ((error as { response?: { status?: number } })?.response?.status !== 401) {
           console.error("Error fetching trace details:", error);
@@ -3487,6 +3530,9 @@ export default defineComponent({
       hasReplaySession,
       rumLocked,
       rumLockedReason,
+      logsLocked,
+      logsLockedReason,
+      licenseLockedView,
       filteredStreamOptions,
       filterStreamFn,
       streamSearchValue,

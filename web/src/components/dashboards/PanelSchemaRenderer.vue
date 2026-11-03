@@ -159,6 +159,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
           :verdict="exemplarVerdict"
           :anchor="exemplarCardAnchor"
           :clamped="exemplarActiveClamp"
+          :locked-reason="tracesLocked ? tracesLockedReason : undefined"
           @enter="exemplarInteraction.onCardEnter"
           @leave="exemplarInteraction.onCardLeave"
           @open-trace="exemplarInteraction.openTrace"
@@ -267,6 +268,29 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
             "
           />
           <div
+            v-if="drilldownLockedReason(drilldown)"
+            class="text-dropdown-item-disabled flex cursor-not-allowed items-center px-4 py-2 text-sm"
+            aria-disabled="true"
+            tabindex="0"
+            :data-test="`drilldown-menu-item-${drilldown.name}`"
+          >
+            <OIcon
+              size="xs"
+              class="text-icon-locked me-2"
+              name="lock"
+              :data-test="`drilldown-menu-item-${drilldown.name}-lock`"
+            />
+            <span class="flex min-w-0 flex-col">
+              <span class="select-none">{{ drilldown.name }}</span>
+              <span
+                class="text-text-secondary text-xs select-none"
+                :data-test="`drilldown-menu-item-${drilldown.name}-reason`"
+                >{{ drilldownLockedReason(drilldown) }}</span
+              >
+            </span>
+          </div>
+          <div
+            v-else
             class="text-dropdown-item-text hover:bg-dropdown-item-hover-bg active:bg-dropdown-item-active-bg flex cursor-pointer items-center px-4 py-2 text-sm transition-colors duration-200"
             :data-test="`drilldown-menu-item-${drilldown.name}`"
             @click="openDrilldown(index)"
@@ -1119,7 +1143,9 @@ export default defineComponent({
       if (!Number.isFinite(start) || !Number.isFinite(end)) return [NaN, NaN];
       return [toExemplarChartX(start), toExemplarChartX(end)];
     });
+    const { locked: tracesLocked, lockedReason: tracesLockedReason } = useLicenseLock("traces");
     const navigateToExemplarTrace = (marker: ExemplarMarker, verdict: TraceVerdict) => {
+      if (tracesLocked.value) return;
       const target = buildExemplarTraceRoute(
         marker,
         verdict,
@@ -2302,6 +2328,7 @@ export default defineComponent({
       drilldownArray,
       onChartClick,
       openDrilldown,
+      drilldownLockedReason,
       hidePopupsAndOverlays,
       drilldownColumnAliases,
       drilldownAllColumns,
@@ -2661,6 +2688,9 @@ export default defineComponent({
       openDrilldown,
       alertsLocked,
       alertsLockedReason,
+      drilldownLockedReason,
+      tracesLocked,
+      tracesLockedReason,
       drilldownPopUpRef,
       annotationPopupRef,
       hidePopupsAndOverlays,
