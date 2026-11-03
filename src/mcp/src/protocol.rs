@@ -28,6 +28,9 @@ use super::{
 /// Answer given to tool calls when the MCP tool registry was never built.
 const MCP_DISABLED_MESSAGE: &str = "MCP is disabled on this node (ZO_MCP_ENABLED=false)";
 
+/// Largest tool result text sent to a client; a larger one cannot fit a model's context window.
+const MAX_TOOL_RESULT_BYTES: usize = 1024 * 1024;
+
 /// A failed request, carrying the JSON-RPC code the client should see.
 struct RpcError {
     code: MCPErrorCode,
@@ -575,6 +578,14 @@ async fn execute_tool(
         filter_response(&metadata.name, &http_response.body, detail)
     };
 
+    if content_text.len() > MAX_TOOL_RESULT_BYTES {
+        return error_result(format!(
+            "Result too large: {} bytes exceeds the {MAX_TOOL_RESULT_BYTES}-byte limit. Retry \
+             with a narrower request (smaller `size` or `limit`, a shorter time range, fewer \
+             fields).",
+            content_text.len()
+        ));
+    }
     if is_error {
         return error_result(content_text);
     }
@@ -1257,6 +1268,12 @@ mod tests {
         }
     }
 
+    /// A JSON object body of exactly `len` bytes.
+    fn json_body_of(len: usize) -> Vec<u8> {
+        let pad = "x".repeat(len - r#"{"pad":""}"#.len());
+        format!(r#"{{"pad":"{pad}"}}"#).into_bytes()
+    }
+
     #[tokio::test]
     async fn invalid_arguments_are_a_tool_error_with_the_validation_message() {
         // Validation fails before any request is sent, so the server is never reached.
@@ -1318,5 +1335,38 @@ mod tests {
 
         assert_eq!(result.is_error, None);
         assert_eq!(result.structured_content, Some(json!({ "id": "d1" })));
+    }
+
+    #[tokio::test]
+    async fn a_result_over_the_limit_is_refused_with_guidance() {
+        let body = json_body_of(MAX_TOOL_RESULT_BYTES + 1);
+        let result = run(
+            &client_answering("200 OK", body).await,
+            json!({ "dashboard_id": "d1" }),
+        )
+        .await;
+
+        assert_eq!(result.is_error, Some(true));
+        assert_eq!(result.structured_content, None);
+        let text = text_of(&result);
+        assert!(text.starts_with("Result too large"), "{text}");
+        assert!(
+            text.contains(&(MAX_TOOL_RESULT_BYTES + 1).to_string()),
+            "{text}"
+        );
+        assert!(text.len() < 512, "{}", text.len());
+    }
+
+    #[tokio::test]
+    async fn a_result_at_the_limit_is_returned_unchanged() {
+        let body = json_body_of(MAX_TOOL_RESULT_BYTES);
+        let result = run(
+            &client_answering("200 OK", body).await,
+            json!({ "dashboard_id": "d1" }),
+        )
+        .await;
+
+        assert_eq!(result.is_error, None);
+        assert_eq!(text_of(&result).len(), MAX_TOOL_RESULT_BYTES);
     }
 }
