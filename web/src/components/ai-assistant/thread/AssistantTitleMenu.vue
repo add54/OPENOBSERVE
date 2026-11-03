@@ -50,6 +50,14 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
           data-test="assistant-title-menu-row-status"
           >{{ chatStatusWord(row.status, row.expiresAt, now, t) }}</span
         >
+        <OText
+          v-else-if="row.updatedAt"
+          as="span"
+          variant="meta"
+          class="shrink-0 tabular-nums"
+          data-test="assistant-title-menu-row-time"
+          >{{ formatRelativeCompact(row.updatedAt, now) }}</OText
+        >
       </span>
     </ODropdownItem>
     <div v-if="failed" class="px-1 py-0.5" data-test="assistant-title-menu-error">
@@ -136,6 +144,7 @@ import OSkeleton from "@/lib/feedback/Skeleton/OSkeleton.vue";
 import ODropdownItem from "@/lib/overlay/Dropdown/ODropdownItem.vue";
 import ODropdownSeparator from "@/lib/overlay/Dropdown/ODropdownSeparator.vue";
 import { raw, useI18nTyped, type I18nText } from "@/types/i18n";
+import { formatRelativeCompact } from "@/utils/formatters";
 
 import { chatStatusClass, chatStatusWord } from "../history/chatStatus";
 import { TITLE_MENU_ROWS, titleMenuRows, type TitleMenuRow } from "./titleMenu";

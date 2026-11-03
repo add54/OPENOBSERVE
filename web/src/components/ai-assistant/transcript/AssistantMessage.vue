@@ -269,10 +269,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
     />
     <div
       v-if="!live && (feedbackShown || $slots.actions)"
-      class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1"
+      class="flex min-w-0 flex-wrap items-center gap-x-1 gap-y-1"
     >
       <AssistantFeedback v-if="feedbackShown" :message="message" :turn="turn" />
-      <span class="flex-1" />
       <slot name="actions" />
     </div>
     <slot name="follow-ups" />

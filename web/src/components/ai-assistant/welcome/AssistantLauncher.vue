@@ -51,9 +51,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
         </OButton>
       </div>
 
-      <template v-if="folded" />
       <AssistantGateState
-        v-else-if="state === 'gate'"
+        v-if="state === 'gate'"
         reason="no_permission"
         size="inline"
         :is-admin="capability.isAdmin"
@@ -72,7 +71,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
           maxlength: MAX_LAUNCHER_CHARS,
           enterkeyhint: 'send',
         }"
-        class="min-w-0"
+        class="min-w-0 max-md:[&>div]:h-11.5 pointer-coarse:[&>div]:h-11.5"
         data-test="assistant-launcher-input"
         @keydown="onKeydown"
       >
@@ -116,7 +115,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
       </OInput>
 
       <div
-        v-if="!folded"
         :class="[
           'grid min-w-0 grid-cols-1 gap-x-6 gap-y-3',
           showSuggestions && '@[40rem]:grid-cols-2',
@@ -150,7 +148,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
           data-test="assistant-launcher-your-chats"
         >
           <div class="flex min-h-7 min-w-0 items-center gap-2">
-            <h3 class="text-text-secondary min-w-0 flex-1 text-xs">
+            <h3 class="text-text-secondary min-w-0 flex-1 ps-1.5 text-xs">
               {{ t("assistant.welcome.launcher.recent") }}
             </h3>
             <OButton
@@ -308,7 +306,7 @@ import OSkeleton from "@/lib/feedback/Skeleton/OSkeleton.vue";
 import OInput from "@/lib/forms/Input/OInput.vue";
 import { trackAssistant } from "@/services/assistantAnalytics";
 import { raw, useI18nTyped } from "@/types/i18n";
-import { formatRelative } from "@/utils/formatters";
+import { formatRelativeCompact } from "@/utils/formatters";
 
 import AssistantStarterRow from "./AssistantStarterRow.vue";
 
@@ -334,11 +332,11 @@ const state = computed(() => {
   const gated = launcherState(capability.gate.value);
   return gated === "ready" && loading.value ? "loading" : gated;
 });
-const shown = computed(() => state.value !== null);
+const shown = computed(() => state.value !== null && !sidebarOpen.value);
 const creditsExhausted = computed(() => capability.value.creditMode === "exhausted");
 const shownStarters = computed(() => starters.value.slice(0, LAUNCHER_ROWS));
-// The sidebar is the composer while it is open, so the card folds to its header (D5 decision 10).
-const folded = computed(() => assistant.state.shell.placement.kind === "sidebar");
+// The sidebar is the assistant while it is open, so Home shows no second one beside it.
+const sidebarOpen = computed(() => assistant.state.shell.placement.kind === "sidebar");
 const showSuggestions = computed(() => state.value !== "gate");
 
 const window = computed(() => timeWindowOf(null, timeOverride.value));
@@ -354,7 +352,7 @@ const recent = computed(() =>
       expiresAt: runBySid.value.get(row.sid)?.expiresAt ?? null,
       title: row.title,
       status: chatStatusOf(row, assistant.state.sessions[row.sid]?.turn.state),
-      at: row.updatedAt ? raw(formatRelative(row.updatedAt)) : null,
+      at: row.updatedAt ? raw(formatRelativeCompact(row.updatedAt)) : null,
     })),
     (row) => row.status,
   ).slice(0, LAUNCHER_ROWS),

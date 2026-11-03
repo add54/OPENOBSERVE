@@ -33,6 +33,12 @@ describe("chatStatus", () => {
     expect(chatStatusOf({ pendingApproval: false, activeTurn: false }, "done")).toBeNull();
   });
 
+  it("reads a waiting question this tab holds as Needs you, though the list calls it running (B2)", () => {
+    const row = { pendingApproval: false, activeTurn: true };
+    expect(chatStatusOf(row, "awaiting_approval")).toBe("needs_you");
+    expect(chatStatusOf(row, { state: "awaiting_approval" })).toBe("needs_you");
+  });
+
   it("reads an expired request as Expired, not as a failure", () => {
     const row = { pendingApproval: false, activeTurn: false };
     const turn = { state: "failed", error: { code: "approval_expired" } };

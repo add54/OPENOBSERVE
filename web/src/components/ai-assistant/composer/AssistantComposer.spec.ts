@@ -187,7 +187,7 @@ describe("rows (§1)", () => {
   });
 
   describe("measured", () => {
-    function measured(textWidth: number): void {
+    function measured(frameWidth: number): void {
       vi.stubGlobal(
         "ResizeObserver",
         class {
@@ -199,11 +199,8 @@ describe("rows (§1)", () => {
       vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue({
         width: 408,
       } as DOMRect);
-      vi.spyOn(Element.prototype, "clientWidth", "get").mockReturnValue(406);
+      vi.spyOn(Element.prototype, "clientWidth", "get").mockReturnValue(frameWidth);
       vi.spyOn(Element.prototype, "scrollHeight", "get").mockReturnValue(38);
-      vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
-        measureText: () => ({ width: textWidth }),
-      } as never);
     }
 
     afterEach(() => {
@@ -211,22 +208,26 @@ describe("rows (§1)", () => {
       vi.unstubAllGlobals();
     });
 
-    it("falls to two rows when one row cannot hold the empty draft's placeholder", async () => {
-      measured(400);
+    it("falls to two rows when the frame leaves the text too little room beside the controls", async () => {
+      measured(340);
       const { wrapper } = setup();
       await flushPromises();
       expect(wrapper.get('[data-test="assistant-composer"]').attributes("data-rows")).toBe("2");
     });
 
-    it("keeps one row for a placeholder that fits", async () => {
-      measured(100);
-      const { wrapper } = setup();
+    it("keeps one row in a frame wide enough, whatever the text (F2)", async () => {
+      measured(406);
+      const { wrapper, textarea } = setup();
       await flushPromises();
-      expect(wrapper.get('[data-test="assistant-composer"]').attributes("data-rows")).toBe("1");
+      const frame = () => wrapper.get('[data-test="assistant-composer"]');
+      expect(frame().attributes("data-rows")).toBe("1");
+      await type(textarea(), "one\ntwo and a much longer second line than the frame holds");
+      await flushPromises();
+      expect(frame().attributes("data-rows")).toBe("1");
     });
 
     it("sizes the field again on a row flip, so a height from the other layout never clips it", async () => {
-      measured(100);
+      measured(406);
       const { textarea, store, sid } = setup();
       await flushPromises();
       textarea().element.style.height = "29px";
@@ -236,10 +237,14 @@ describe("rows (§1)", () => {
     });
   });
 
-  it("takes two rows for a second line of text", async () => {
+  it("never flips the rows on a keystroke or a new line (F2)", async () => {
     const { wrapper, textarea } = setup();
+    const rows = () => wrapper.get('[data-test="assistant-composer"]').attributes("data-rows");
+    const before = rows();
+    await type(textarea(), "o");
+    expect(rows()).toBe(before);
     await type(textarea(), "one\ntwo");
-    expect(wrapper.get('[data-test="assistant-composer"]').attributes("data-rows")).toBe("2");
+    expect(rows()).toBe(before);
   });
 
   it("keeps the same DOM order at every width: text, tray, +, i, picker, mic, Send", () => {
@@ -407,32 +412,6 @@ describe("states (`40` §1.3)", () => {
     expect(wrapper.find('[data-test="assistant-composer-controls"]').exists()).toBe(false);
     expect(wrapper.find('[data-test="assistant-composer-helper"]').exists()).toBe(false);
     expect(wrapper.find('[data-test="assistant-composer-go-to-request"]').exists()).toBe(false);
-  });
-
-  it("offers Go to request only while the card is out of view", async () => {
-    let report: (entries: { isIntersecting: boolean }[]) => void = () => undefined;
-    vi.stubGlobal(
-      "IntersectionObserver",
-      class {
-        constructor(callback: typeof report) {
-          report = callback;
-        }
-        observe = vi.fn();
-        disconnect = vi.fn();
-      },
-    );
-    const { wrapper, store, sid, host } = setup();
-    host.insertAdjacentHTML("afterbegin", '<div data-test="assistant-approval-card"></div>');
-    store.state.sessions[sid].pendingApproval = { id: "c1" } as PendingApproval;
-    await flushPromises();
-    const link = '[data-test="assistant-composer-go-to-request"]';
-    report([{ isIntersecting: false }]);
-    await flushPromises();
-    expect(wrapper.get(link).text()).toBe("Go to request");
-    report([{ isIntersecting: true }]);
-    await flushPromises();
-    expect(wrapper.find(link).exists()).toBe(false);
-    vi.unstubAllGlobals();
   });
 
   it("states the decline above the frame in reply mode, with no context controls (CT-07 AC 4)", async () => {
@@ -1005,8 +984,11 @@ describe("round 2 (U7–U9, U12, U16, U18–U19, F5, F8)", () => {
     await flushPromises();
     const button = wrapper.find('[data-test="assistant-recall-open"]');
     expect(button.exists()).toBe(true);
+    expect(button.attributes("aria-expanded")).toBe("false");
     await button.trigger("click");
     await flushPromises();
+    // An expanded trigger keeps its tooltip shut, so the bubble never floats over the sheet (D2).
+    expect(button.attributes("aria-expanded")).toBe("true");
     (
       document.body.querySelector('[data-test="assistant-recall-sheet-close"]') as HTMLElement
     ).click();

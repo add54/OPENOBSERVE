@@ -169,24 +169,13 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
         @focus="refreshPageContext"
         @blur="onBlur"
       >
-        <template v-if="inertKind" #footer>
-          <OButton
-            v-if="cardAway"
-            variant="ghost-primary"
-            size="chip"
-            :class="['me-1 shrink-0', TOUCH_TARGET_CLASS]"
-            data-test="assistant-composer-go-to-request"
-            @click="goToRequest"
-          >
-            {{ t("assistant.composer.goToRequest") }}
-          </OButton>
-        </template>
+        <template v-if="inertKind" #footer />
         <template v-else #footer>
           <div
             ref="controls"
             :class="[
               'flex min-w-0 items-center gap-0.5',
-              twoRows ? 'mt-1 flex-wrap px-1 pb-1' : 'shrink-0 pe-1',
+              twoRows ? 'mt-1 flex-wrap px-1 pb-1' : 'shrink-0 pe-1 pb-1.25',
             ]"
             data-test="assistant-composer-controls"
           >
@@ -225,6 +214,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
               v-if="coarse && recallEntries.length > 0"
               :label="t('assistant.composer.recentPrompts')"
               :icon="assistantGlyph.history"
+              aria-haspopup="dialog"
+              :aria-expanded="recallOpen"
               data-test="assistant-recall-open"
               @click="recallOpen = true"
             />
@@ -478,7 +469,7 @@ import {
   noteDraftCleared,
 } from "./composerUi";
 import { useAssistantVoice } from "./useAssistantVoice";
-import { controlsWidthOf, textWidthOf, useComposerWidth } from "./useComposerWidth";
+import { controlsWidthOf, useComposerWidth } from "./useComposerWidth";
 
 const props = withDefaults(defineProps<AssistantComposerProps>(), {
   density: "compact",
@@ -517,7 +508,6 @@ const prefillPending = ref<{ text: string; chips: ContextChip[]; homeStarter?: b
 // The last long paste, offered back as plain text until the next edit or send (D4 decision 10).
 const pasteOffer = ref<{ chipId: string; text: string; at: number } | null>(null);
 const attachDismissed = ref(false);
-const cardAway = ref(false);
 const now = ref(Date.now());
 let emphasisTimer: ReturnType<typeof setTimeout> | null = null;
 let emptyEnterSaid = false;
@@ -527,8 +517,6 @@ let pointerDown = false;
 let cancelDeferredClose: (() => void) | null = null;
 let clearedTimer: ReturnType<typeof setTimeout> | null = null;
 let capTimer: ReturnType<typeof setTimeout> | null = null;
-let cardObserver: IntersectionObserver | null = null;
-let cardMutations: MutationObserver | null = null;
 const usedSendIds = new Set<string>();
 const offs: (() => void)[] = [];
 
@@ -724,8 +712,9 @@ const threadLine = computed<I18nText | null>(() => {
     : null;
 });
 
+// A followed turn speaks once, in the shell's elsewhere row, which also knows a run this tab started before a reload (B1).
 const answeringLine = computed<I18nText | null>(() => {
-  if (elsewhere.value) return t("assistant.composer.elsewhere");
+  if (elsewhere.value) return null;
   return running.value && hasContent.value && !stalled.value && state.value !== "stopping"
     ? t("assistant.composer.running")
     : null;
@@ -763,15 +752,13 @@ function measureRows(): void {
   twoRows.value = !composerFitsOneRow({
     narrow: width.narrow.value,
     extras: (attached.value && !replying.value) || voiceExtra.value,
-    text: shownText.value,
-    textWidth: width.width.value > 0 ? textWidthOf(field, shownText.value || placeholder.value) : 0,
     frameWidth: width.width.value > 0 ? (field?.parentElement?.clientWidth ?? 0) : 0,
     controlsWidth: controlsWidthOf(controls.value),
   });
 }
 
 watch(
-  [shownText, placeholder, width.width, width.narrow, attached, replying, voiceExtra, inertKind],
+  [width.width, width.narrow, attached, replying, voiceExtra, inertKind],
   () => void nextTick(measureRows),
   { flush: "post" },
 );
@@ -798,7 +785,7 @@ watch(
 
 const frameClass = computed(() => [
   inertKind.value ? INERT_FRAME_CLASS : FRAME_CLASS,
-  twoRows.value ? "" : "[&>div]:flex-row [&>div]:items-center",
+  twoRows.value ? "" : "[&>div]:flex-row [&>div]:items-end",
 ]);
 
 provide(
@@ -845,7 +832,8 @@ const textboxAttrs = computed(() => ({
   "data-assistant-composer": "",
   class: [
     "py-2.25! max-md:min-h-11 pointer-coarse:min-h-11",
-    twoRows.value ? "pb-0!" : "",
+    // A column frame sizes a `flex-1` textbox by its one `rows` line, ignoring the grown height (F1).
+    twoRows.value ? "pb-0! basis-auto!" : "",
     inertKind.value ? "text-text-secondary!" : "",
   ].join(" "),
 }));
@@ -857,6 +845,9 @@ function focusInput(caret: "end" | number = "end"): void {
   target.focus({ preventScroll: true });
   const at = caret === "end" ? target.value.length : Math.min(caret, target.value.length);
   target.setSelectionRange(at, at);
+  // Focus skips scrolling, and a restored draft past the row cap would hide its caret below the fold.
+  if (at === target.value.length)
+    requestAnimationFrame(() => (target.scrollTop = target.scrollHeight));
 }
 
 function say(line: I18nText): void {
@@ -1423,10 +1414,6 @@ function dismissAttachNotice(): void {
   void nextTick(() => focusInput("end"));
 }
 
-function goToRequest(): void {
-  assistantFocusCard();
-}
-
 // The whole staged payload moves, so the new chat sends exactly what this one would have (S8).
 function startNew(): void {
   const current = session.value;
@@ -1519,40 +1506,6 @@ watch(
     };
     tick();
     if (busyLeft.value > 0) busyTimer = setInterval(tick, 1_000);
-  },
-  { immediate: true },
-);
-
-// "Go to request" shows only while the card is out of view; the card may mount after the frame that named it.
-function stopCardWatch(): void {
-  cardObserver?.disconnect();
-  cardMutations?.disconnect();
-  cardObserver = null;
-  cardMutations = null;
-  cardAway.value = false;
-}
-
-function observeCard(): boolean {
-  const card = shellRoot()?.querySelector('[data-test="assistant-approval-card"]');
-  if (!card || typeof IntersectionObserver === "undefined") return false;
-  cardObserver = new IntersectionObserver(([entry]) => (cardAway.value = !entry.isIntersecting));
-  cardObserver.observe(card);
-  return true;
-}
-
-watch(
-  () => session.value?.pendingApproval?.id,
-  async (id) => {
-    stopCardWatch();
-    await nextTick();
-    const shell = shellRoot();
-    if (!id || !shell || observeCard() || typeof MutationObserver === "undefined") return;
-    cardMutations = new MutationObserver(() => {
-      if (!observeCard()) return;
-      cardMutations?.disconnect();
-      cardMutations = null;
-    });
-    cardMutations.observe(shell, { childList: true, subtree: true });
   },
   { immediate: true },
 );
@@ -1779,7 +1732,6 @@ onBeforeUnmount(() => {
   if (mentionTimer) clearTimeout(mentionTimer);
   if (capTimer) clearTimeout(capTimer);
   if (busyTimer) clearInterval(busyTimer);
-  stopCardWatch();
   cancelDeferredClose?.();
 });
 

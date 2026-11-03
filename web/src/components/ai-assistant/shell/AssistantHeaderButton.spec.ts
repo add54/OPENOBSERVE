@@ -252,6 +252,76 @@ describe("AssistantHeaderButton light", () => {
     expect(tooltip(wrapper)).toBe("O2 Assistant · Open");
   });
 
+  it("mutes its tooltip while a container shows, keeps the state in its name, and closes the sidebar (D1, E2)", async () => {
+    const { wrapper, store } = setup();
+    session(store, "Checkout");
+    store.open({ kind: "sidebar" }, { focus: "none" });
+    await flushPromises();
+    expect(wrapper.findComponent(OTooltip).props("disabled")).toBe(true);
+    expect(button(wrapper).attributes("aria-label")).toBe("O2 Assistant, open");
+    openAssistant.mockClear();
+    await button(wrapper).trigger("click");
+    expect(store.state.shell.placement.kind).toBe("hidden");
+    expect(openAssistant).not.toHaveBeenCalled();
+  });
+
+  it("opens the sidebar on a new chat when only a floating window shows (E1)", async () => {
+    const { wrapper, store } = setup();
+    const sid = session(store, "Checkout");
+    store.state.shell.windows.push({
+      sid,
+      state: "open",
+      geometry: { x: 0, y: 0, widthRem: 24, heightRem: 30 },
+    } as never);
+    await flushPromises();
+    openAssistant.mockClear();
+    await button(wrapper).trigger("click");
+    expect(openAssistant).toHaveBeenCalledWith(
+      expect.objectContaining({ container: "sidebar", thread: "new", entryKind: "header_button" }),
+    );
+  });
+
+  it.each<[string, (store: any, sid: string) => void]>([
+    ["running", (store, sid) => (store.state.sessions[sid].turn = { state: "responding.writing" })],
+    [
+      "waiting",
+      (store, sid) =>
+        (store.state.sessions[sid].turn = { state: "awaiting_approval", callId: "c1" }),
+    ],
+  ])(
+    "opens a new sidebar chat over a %s floating chat, never just raising it (E1)",
+    async (_n, light) => {
+      const { wrapper, store } = setup();
+      const sid = session(store, "Checkout");
+      store.state.shell.windows.push({
+        sid,
+        state: "open",
+        geometry: { x: 0, y: 0, widthRem: 24, heightRem: 30 },
+      } as never);
+      light(store, sid);
+      await flushPromises();
+      openAssistant.mockClear();
+      await button(wrapper).trigger("click");
+      expect(openAssistant).toHaveBeenCalledWith(
+        expect.objectContaining({ container: "sidebar", thread: "new" }),
+      );
+    },
+  );
+
+  it("closes an open sidebar even while another, hidden chat is lit (E2)", async () => {
+    const { wrapper, store } = setup();
+    const lit = session(store, "Elsewhere");
+    store.state.sessions[lit].turn = { state: "responding.writing" };
+    const shown = session(store, "Checkout");
+    store.setActive(shown);
+    store.open({ kind: "sidebar" }, { focus: "none" });
+    await flushPromises();
+    openAssistant.mockClear();
+    await button(wrapper).trigger("click");
+    expect(store.state.shell.placement.kind).toBe("hidden");
+    expect(openAssistant).not.toHaveBeenCalled();
+  });
+
   it("shows working with the title, and a count for more than one", async () => {
     const { wrapper, store } = setup();
     const a = session(store, "Checkout 5xx");

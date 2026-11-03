@@ -380,10 +380,23 @@ describe("foldTurns: replay phase", () => {
       user: { text: "q" },
       frames: [{ type: "message_delta", content: "partial" }],
     };
-    for (const status of [undefined, "interrupted", "running"] as const) {
+    for (const status of [undefined, "interrupted"] as const) {
       const [, answer] = replay([{ ...unfinished, ...(status && { status }) }]);
       expect(answer.contentBlocks?.at(-1)).toEqual({ type: "error", errorType: "stream_dropped" });
     }
+  });
+
+  it("never marks a turn the server still runs as dropped", () => {
+    const [, answer] = replay([
+      {
+        user: { text: "q" },
+        frames: [{ type: "message_delta", content: "partial" }],
+        status: "running",
+      },
+    ]);
+    expect(answer.contentBlocks?.some((block) => block.type === "error")).toBe(false);
+    const [, empty] = replay([{ user: { text: "q" }, frames: [], status: "running" }]);
+    expect(empty?.contentBlocks?.some((block) => block.type === "error") ?? false).toBe(false);
   });
 
   it("names a stored failure without an error frame by its stored code", () => {

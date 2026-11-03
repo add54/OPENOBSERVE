@@ -182,14 +182,16 @@ test.describe("assistant shell", () => {
     await expect.poll(focusedInside).toBe(true);
     await expect(assistant.composer()).toBeFocused();
     await expect(sheet.locator('[data-test="assistant-status-region"]')).toHaveText("O2 Assistant opened.");
-    await sheet.locator('[data-test="assistant-shell-sheet-peek"]').click();
+    const handle = sheet.locator('[data-test="assistant-shell-sheet-handle"]');
+    await handle.focus();
+    await page.keyboard.press("ArrowDown");
     await expect(sheet).toHaveAttribute("data-snap", "peek");
     await expect(sheet.locator('[data-test="assistant-shell-sheet-peek-row"]')).toContainText("New chat");
     await sheet.locator('[data-test="assistant-shell-sheet-peek-row"]').click();
     await expect(sheet).toHaveAttribute("data-snap", "half");
-    await sheet.locator('[data-test="assistant-shell-sheet-expand"]').click();
+    await handle.click();
     await expect(sheet).toHaveAttribute("data-snap", "full");
-    await sheet.locator('[data-test="assistant-shell-sheet-peek"]').click();
+    await handle.click();
     await expect(sheet).toHaveAttribute("data-snap", "half");
     const inset = await page.evaluate(() =>
       Number(

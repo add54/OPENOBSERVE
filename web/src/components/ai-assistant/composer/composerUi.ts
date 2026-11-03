@@ -76,9 +76,6 @@ export interface ComposerRowInput {
   narrow: boolean;
   /** Chips, images, a meter or anything else the control row must show beyond time. */
   extras: boolean;
-  text: string;
-  /** The draft's width, or the placeholder's while the draft is empty. */
-  textWidth: number;
   frameWidth: number;
   controlsWidth: number;
 }
@@ -93,11 +90,13 @@ let seq = 0;
 // The textbox's 12 px padding on each side and the 4 px end padding of the one-row controls.
 const TEXT_INSET_PX = 28;
 
-/** One row holds while the draft or placeholder fits a line beside the controls and nothing else needs showing. */
+export const ONE_ROW_TEXT_PX = 320;
+
+/** The container's width alone picks the layout, so typing, a new line or the placeholder never moves the controls (F2). */
 export function composerFitsOneRow(input: ComposerRowInput): boolean {
-  if (input.narrow || input.extras || input.text.includes("\n")) return false;
+  if (input.narrow || input.extras) return false;
   if (input.frameWidth === 0) return true;
-  return Math.ceil(input.textWidth) + TEXT_INSET_PX + input.controlsWidth <= input.frameWidth;
+  return input.frameWidth - input.controlsWidth - TEXT_INSET_PX >= ONE_ROW_TEXT_PX;
 }
 
 /** The composer's layout for a control inside it; outside a composer nothing is narrow. */

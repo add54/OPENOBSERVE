@@ -315,9 +315,9 @@ test.describe("assistant approval cards", () => {
     await ask(page, "confirmation");
     await expect(assistant.composer()).toBeFocused();
     await expect(region()).toContainText("Press Control I to review it.");
-    const review = assistant.container().locator('[data-test="assistant-strip-review"]');
-    await expect(review).toHaveText(/^Review request · expires in \d+:\d\d$/);
-    await review.click();
+    // The strip offers Review only while the card is out of view, so Ctrl+I is the bridge here.
+    await expect(assistant.container().locator('[data-test="assistant-strip-review"]')).toHaveCount(0);
+    await page.keyboard.press("ControlOrMeta+i");
     await expect(deny()).toBeFocused();
     await page.keyboard.press("Tab");
     await expect(assistant.approval().locator('[data-test="assistant-approval-reply"]')).toBeFocused();

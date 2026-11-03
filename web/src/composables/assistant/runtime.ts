@@ -441,7 +441,10 @@ function runsDeps(
         invoker,
       }),
     focusCard: assistantFocusCard,
-    stopElsewhere: (sid) => lifecycle().stopElsewhere(sid),
+    stopElsewhere: (sid) =>
+      lifecycle()
+        .stopElsewhere(sid)
+        .then(() => undefined),
     approvalElsewhere: (sid) => lifecycle().approvalElsewhere(sid),
   };
 }

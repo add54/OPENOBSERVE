@@ -34,14 +34,16 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
         <OIcon v-if="glyph" :name="glyph" size="xs" data-test="assistant-turn-status-glyph" />
         <AssistantStatusDot v-else state="working" data-test="assistant-turn-status-spinner" />
       </span>
-      <span class="flex min-w-0 flex-1 flex-col">
-        <OTruncatedText class="min-w-0" data-test="assistant-turn-status-text">{{
-          status.line
-        }}</OTruncatedText>
-        <span v-if="status.second" class="min-w-0" data-test="assistant-turn-status-stall">{{
-          status.second
-        }}</span>
-      </span>
+      <OTruncatedText class="min-w-0" data-test="assistant-turn-status-text">{{
+        status.line
+      }}</OTruncatedText>
+      <OText
+        v-if="status.elapsed"
+        variant="meta"
+        class="ms-auto min-w-[11ch] shrink-0 text-end whitespace-nowrap tabular-nums"
+        data-test="assistant-turn-status-elapsed"
+        >{{ status.elapsed }}</OText
+      >
     </div>
     <OButton
       v-if="variant !== 'block' && stoppable"
@@ -106,12 +108,14 @@ import {
   elapsedMs,
   isTerminal,
   stepsOf,
+  trailRowCount,
   turnStatusText,
   type TurnProgress,
 } from "@/composables/assistant/pure";
 import OButton from "@/lib/core/Button/OButton.vue";
 import OCard from "@/lib/core/Card/OCard.vue";
 import OIcon from "@/lib/core/Icon/OIcon.vue";
+import OText from "@/lib/core/Typography/OText.vue";
 import OTruncatedText from "@/lib/core/Typography/OTruncatedText.vue";
 import { raw, useI18nTyped } from "@/types/i18n";
 import { formatElapsed } from "@/utils/formatters";
@@ -137,11 +141,14 @@ const status = computed(() => {
   void tick.value;
   if (!live.value) return null;
   if (!props.ownedByThisTab)
-    return { line: t("assistant.turn.elsewhere"), tone: "neutral" as const };
+    return { line: t("assistant.turn.elsewhere"), elapsed: null, tone: "neutral" as const };
   const now = clock();
   const shared = turnStatusText(props.turn, props.meta, t, now, progress.value);
-  const own = shared ? (props.line ?? hostLine(now, shared.line)) : null;
-  return shared && own ? { ...shared, line: own } : shared;
+  if (!shared) return null;
+  const own = props.line ?? hostLine(now, shared.line);
+  // The helper and the analysis say their own seconds in the line, so they carry no second timer.
+  if (own) return { ...shared, line: own, elapsed: null };
+  return { ...shared, elapsed: props.copy === "chat" ? shared.elapsed : null };
 });
 
 const progress = computed<TurnProgress>(() => {
@@ -150,7 +157,8 @@ const progress = computed<TurnProgress>(() => {
   return {
     step: steps.find((step) => step.callId === callId)?.n ?? null,
     running: steps.filter((step) => step.state === "running").length || 1,
-    results: steps.filter((step) => step.state === "done" || step.state === "failed").length,
+    // The finished trail's header counts the rows it opens to, so the live count uses its rule (A4).
+    results: trailRowCount(steps.filter((s) => s.state === "done" || s.state === "failed")),
   };
 });
 

@@ -21,6 +21,7 @@ import {
   POLL_FAST_FOR_MS,
   POLL_FAST_MS,
   POLL_SLOW_MS,
+  POLL_STALLED_MS,
   POLL_STOP_MS,
   assistantClientId,
   createElsewhere,
@@ -157,6 +158,30 @@ describe("createElsewhere", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(elsewhere.views.s1.mode).toBe("polling");
     expect(poll).toHaveBeenCalledTimes(stopped + 1);
+    elsewhere.dispose();
+  });
+
+  it("still reads a stalled follow every few minutes, so a turn that ended unseen stops answering (B3)", async () => {
+    const { elsewhere, poll, ended } = tab();
+    elsewhere.start("s1", { approval: false, turnId: "t1" });
+    await vi.advanceTimersByTimeAsync(POLL_STOP_MS + POLL_SLOW_MS);
+    expect(elsewhere.views.s1.mode).toBe("stalled");
+    const stopped = poll.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(POLL_STALLED_MS);
+    expect(poll).toHaveBeenCalledTimes(stopped + 1);
+    expect(elsewhere.views.s1.mode).toBe("stalled");
+    poll.mockResolvedValue({ running: false, approval: false, turnId: "t1" });
+    await vi.advanceTimersByTimeAsync(POLL_STALLED_MS);
+    expect(ended).toHaveBeenCalledWith("s1");
+    expect(elsewhere.views.s1).toBeUndefined();
+  });
+
+  it("marks a run the server names with this tab's own earlier id as this tab's", () => {
+    const { elsewhere } = tab({ clientId: () => "me" });
+    elsewhere.start("s1", { approval: true, turnId: "t1", ownerClientId: "me" });
+    expect(elsewhere.views.s1.ownedHere).toBe(true);
+    elsewhere.start("s2", { approval: true, turnId: "t2", ownerClientId: "other" });
+    expect(elsewhere.views.s2.ownedHere).toBe(false);
     elsewhere.dispose();
   });
 

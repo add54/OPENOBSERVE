@@ -30,6 +30,8 @@ export type DraftPayload = Pick<
   imageCount?: number;
   /** The pending picker choice (`00` §10.4). */
   agentId?: AgentId;
+  /** The chat never sent anything, so there is no history to read it back from. */
+  unsent?: true;
 };
 
 export interface DraftStoreOptions {
@@ -162,6 +164,7 @@ function toPayload(draft: DraftPayload): DraftPayload {
     ...(typeof draft.imageCount === "number" &&
       draft.imageCount > 0 && { imageCount: draft.imageCount }),
     ...(agentIdOf(draft.agentId) && { agentId: agentIdOf(draft.agentId)! }),
+    ...(draft.unsent === true && { unsent: true }),
   };
 }
 

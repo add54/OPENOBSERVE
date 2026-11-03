@@ -54,7 +54,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
     </div>
     <div
       v-else-if="dropTarget === 'tray'"
-      class="border-border-strong text-text-secondary fixed end-[calc(var(--o-tray-end)*1rem)] bottom-2 z-5000 flex h-10 w-60 items-center justify-center border-2 border-dashed text-sm"
+      class="border-border-strong text-text-secondary fixed end-[calc((var(--o-tray-end,0)+0.75)*1rem)] bottom-3 z-5000 flex h-10 w-60 items-center justify-center border-2 border-dashed text-sm"
       data-test="assistant-drop-tray"
     >
       {{ t("assistant.window.dropTray") }}

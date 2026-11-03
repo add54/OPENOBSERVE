@@ -18,8 +18,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
   <Error404 v-if="view === 'not_found'" />
   <OPageLayout
     v-else
-    :title="t('assistant.name')"
-    :icon="assistantGlyph.assistant"
+    :title="view === 'shell' ? undefined : t('assistant.name')"
+    :icon="view === 'shell' ? undefined : assistantGlyph.assistant"
     bleed
     title-data-test="assistant-view-title"
     :sidebar-width="railPx(RAIL_REM)"
@@ -36,6 +36,10 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
       />
     </template>
     <div class="flex h-full min-h-0 flex-col" data-test="assistant-view" :data-view="view">
+      <!-- The chat bar is the page's only header, so the page name is said, not drawn -->
+      <h1 v-if="view === 'shell'" class="sr-only" data-test="assistant-view-title">
+        {{ t("assistant.name") }}
+      </h1>
       <div
         v-if="view === 'loading'"
         class="mx-auto flex w-full max-w-3xl flex-col gap-3 p-4"

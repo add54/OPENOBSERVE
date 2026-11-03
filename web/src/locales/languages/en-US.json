@@ -10195,7 +10195,8 @@
     "claim": {
       "name": "Evidence {n}, {step}",
       "notAvailable": "Evidence not available in this view",
-      "citation": "Citation {n}, query {n}, {rows}"
+      "citation": "Citation {n}, query {n}, {rows}",
+      "range": "Citations {from} to {to}"
     },
     "client": {
       "copyManually": "Couldn't copy. Select the text and copy it.",
@@ -10247,9 +10248,7 @@
       "inert": "Decide above to continue",
       "busy": "{product} is busy. Send again in {s} s.",
       "unsent": "Isn't reachable. Your message wasn't sent.",
-      "goToRequest": "Go to request",
       "imageCap": "{name} wasn't added. Up to {count} images, {size} each.",
-      "elsewhere": "Answering in another tab.",
       "sendReply": "Send reply",
       "addContextTip": "Add context · {'@'}",
       "offline": "You're offline. Draft kept.",
@@ -10770,7 +10769,9 @@
         "body": "Findings so far are kept above.",
         "bodyPartial": "The text above is incomplete.",
         "title": "Connection lost after {elapsed}. Nothing was changed.",
-        "titleAfterChange": "Connection lost after {elapsed}."
+        "titleAfterChange": "Connection lost after {elapsed}.",
+        "titleAfterChangeNow": "Connection lost.",
+        "titleNow": "Connection lost. Nothing was changed."
       },
       "stream_oversized": {
         "action": "Retry",
@@ -10861,6 +10862,7 @@
       "windowCapped": "{window} (cut to the last 7 days)",
       "askAdmin": "Ask an admin",
       "line": "{count} query, {range} | {count} queries, {range}",
+      "stepsLine": "{count} step, {range} | {count} steps, {range}",
       "noAccess": "{n} citation unavailable: no access to {stream} | {n} citations unavailable: no access to {stream}",
       "noAccessPlain": "{n} citation unavailable | {n} citations unavailable"
     },
@@ -11073,9 +11075,12 @@
       "creditsExhaustedNoDate": "AI credits are used up for this organization.",
       "creditsExhaustedResets": "AI credits are used up for this organization. They reset {date}.",
       "discarded": "Proposal discarded. Ask again to get a new one.",
-      "door": "Ask AI",
+      "door": "Generate query",
+      "doorFunction": "Generate function",
+      "doorFunctionTooltip": "Ask the assistant to write or change this function",
       "doorTooltip": "Ask the assistant to write or change this query",
       "dropped": "Connection lost after {seconds} s. Nothing was changed.",
+      "droppedNow": "Connection lost. Nothing was changed.",
       "editPrompt": "Edit prompt",
       "editorPlaceholder": {
         "js": "Write a JavaScript function, for example: return event",
@@ -11807,6 +11812,7 @@
     "shell": {
       "answeringElsewhere": "Answering in another tab",
       "answeringElsewherePolling": "Still answering in another tab. This view refreshes every few seconds.",
+      "answeringHerePolling": "Still answering. This view refreshes every few seconds.",
       "approvalElsewhere": "Another tab is waiting for your approval on this chat. Decide there first.",
       "approvalNotAnswerableHere": "Waiting for your approval in the tab where you asked. Approve or deny it there, or stop this answer.",
       "close": "Close {product}",
@@ -11842,6 +11848,11 @@
       "resizeHandleValue": "{width} rem",
       "sheetExpand": "Show more",
       "sheetPeek": "Show less",
+      "sheetSnap": {
+        "full": "Full height",
+        "half": "Half height",
+        "peek": "Collapsed"
+      },
       "signOutRunningBody": "{count} answer is still running. Signing out stops it. | {count} answers are still running. Signing out stops them.",
       "signOutRunningTitle": "Answers are still running",
       "signedOutElsewhere": "You signed out in another tab.",
@@ -11941,14 +11952,15 @@
       },
       "stoppedBeforeFinish": "stopped before it finished",
       "streams": "{count} stream | {count} streams",
-      "summary": "Worked through {count} step | Worked through {count} steps",
+      "summary": "{count} step | {count} steps",
       "window": "{from} → {to}",
       "windowShowing": "{from} → {to} · Showing {shown} of {total} rows"
     },
     "strip": {
       "goToAnswer": "Go to answer",
       "review": "Review request",
-      "reviewExpires": "Review request · expires in {time}"
+      "reviewExpires": "Review request · expires in {time}",
+      "reviewLabel": "Review"
     },
     "thread": {
       "delete": "Delete chat",
@@ -11968,6 +11980,7 @@
       "renameFailed": "Couldn't rename the chat",
       "renameLabel": "Chat title",
       "renamed": "Renamed",
+      "thisChat": "This chat",
       "renaming": "Renaming…",
       "titleCounter": "{count}/200",
       "unpin": "Unpin",
@@ -12109,7 +12122,6 @@
       "moreRunning": "{label} and {count} more",
       "noResponse": "No response for {n} s",
       "notSaved": "Answered, but not saved to history.",
-      "pausedAt": "paused at {elapsed}",
       "reconnecting": "Reconnecting…",
       "restored": "This chat moved to another server and continued.",
       "retrying": "Retrying the AI provider · attempt {n}",
@@ -12126,7 +12138,6 @@
       "stopping": "Stopping…",
       "thinking": "Thinking",
       "thinkingAbout": "Thinking about {count} result | Thinking about {count} results",
-      "totalElapsed": "{elapsed} in all",
       "waitingApproval": "Waiting for your approval",
       "waitingConsent": "Waiting for your decision on paid usage",
       "withElapsed": "{status} · {elapsed}",

@@ -2120,10 +2120,10 @@ export const BADGE_GROUPS = {
   assistantClaim: {
     mode: "plain",
     shape: "rounded",
-    size: "sm",
+    size: "xs",
     values: {
-      available: { variant: "default-outline" },
-      muted: { variant: "default-soft", class: "text-text-muted" },
+      available: { variant: "primary-soft", class: "text-assistant-link! font-medium" },
+      muted: { variant: "default-soft", class: "text-text-muted! ring-0!" },
     },
     fallback: { variant: "default-soft" },
   },

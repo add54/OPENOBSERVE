@@ -61,19 +61,29 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
       {{ line }}
     </span>
   </div>
-  <OBanner
+  <component
+    :is="framed ? OBanner : 'div'"
     v-else
-    :variant="look.variant"
-    :icon="look.icon"
-    dense
-    role="presentation"
+    v-bind="frame"
     data-test="assistant-turn-outcome"
     :data-kind="kind"
     :data-code="code"
   >
     <div class="@container min-w-0">
       <!-- The one action ends the title row and comes before the meta row in reading and tab order (D7 §3.1, HT-10 AC 5) -->
-      <div class="flex min-w-0 items-start gap-x-3 gap-y-1.5 @max-[28rem]:flex-col">
+      <div
+        :class="[
+          'flex min-w-0 gap-x-3 gap-y-1.5',
+          framed ? 'items-start @max-[28rem]:flex-col' : 'items-center',
+        ]"
+      >
+        <OIcon
+          v-if="!framed"
+          :name="look.icon"
+          size="sm"
+          class="text-status-error-text shrink-0"
+          aria-hidden="true"
+        />
         <div class="flex min-w-0 flex-1 flex-col gap-0.5">
           <p :id="titleId" class="min-w-0 break-words" data-test="assistant-turn-outcome-title">
             {{ title }}
@@ -103,7 +113,14 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
             </OButton>
           </p>
         </div>
-        <div v-if="action" class="flex shrink-0 @max-[28rem]:w-full">
+        <AssistantErrorDetails
+          v-if="detailsShown && !framed"
+          variant="popover"
+          :error="error!"
+          :at="at ?? now()"
+          :is-admin="role === 'admin'"
+        />
+        <div v-if="action" :class="['flex shrink-0', framed && '@max-[28rem]:w-full']">
           <AssistantAskAdminPopover
             v-if="action === 'ask_admin'"
             :kind="askKind"
@@ -113,9 +130,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
           >
             <template #trigger>
               <OButton
-                variant="outline"
+                :variant="actionVariant"
                 size="xs"
-                :class="ACTION_CLASS"
+                :class="actionClass"
                 :aria-describedby="titleId"
                 data-test="assistant-turn-outcome-action"
                 @click="emit('action', 'ask_admin')"
@@ -126,13 +143,13 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
           </AssistantAskAdminPopover>
           <OButton
             v-else-if="newTabHref"
-            variant="outline"
+            :variant="actionVariant"
             size="xs"
             as="a"
             :href="newTabHref"
             target="_blank"
             rel="noopener noreferrer"
-            :class="ACTION_CLASS"
+            :class="actionClass"
             :aria-describedby="titleId"
             data-test="assistant-turn-outcome-action"
             :data-settings="settingsHref ? '' : undefined"
@@ -143,11 +160,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
           </OButton>
           <OButton
             v-else
-            variant="outline"
+            :variant="actionVariant"
             size="xs"
             :disabled="unavailable"
             :focusable-unavailable="unavailable"
-            :class="ACTION_CLASS"
+            :class="actionClass"
             :aria-describedby="disabledReason ? undefined : titleId"
             data-test="assistant-turn-outcome-action"
             @click="emit('action', action)"
@@ -159,7 +176,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
         </div>
       </div>
       <div
-        v-if="hint || manualShown || agentFallback || detailsShown"
+        v-if="hint || manualShown || agentFallback || (detailsShown && framed)"
         class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 pt-1 text-xs"
         data-test="assistant-turn-outcome-meta"
       >
@@ -187,7 +204,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
           {{ agentFallback.label }}
         </OButton>
         <AssistantErrorDetails
-          v-if="detailsShown"
+          v-if="detailsShown && framed"
           variant="popover"
           :error="error!"
           :at="at ?? now()"
@@ -195,7 +212,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
         />
       </div>
     </div>
-  </OBanner>
+  </component>
 </template>
 
 <script lang="ts">
@@ -473,6 +490,16 @@ const manualLabel = computed(() => {
   return t("assistant.outcome.manualRoute", { explorer: explorerLabel(explorer, t) });
 });
 const look = computed(() => LOOKS[props.kind]);
+const framed = computed(() => props.kind !== "failed");
+const frame = computed(() =>
+  framed.value
+    ? { variant: look.value.variant, icon: look.value.icon, dense: true, role: "presentation" }
+    : { class: "text-text-secondary min-w-0 text-xs leading-5" },
+);
+const actionVariant = computed(() => (framed.value ? "outline" : "ghost-primary"));
+const actionClass = computed(() =>
+  framed.value ? ACTION_CLASS : "max-md:min-h-11 pointer-coarse:min-h-11",
+);
 // Stopped and expired are facts about the turn, not faults, so they read as a line of the answer.
 const plainLine = computed(() => props.kind === "stopped" || props.kind === "expired");
 const connectionLost = computed(

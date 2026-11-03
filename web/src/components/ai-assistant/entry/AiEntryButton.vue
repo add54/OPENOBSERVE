@@ -89,10 +89,19 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
           'focus-visible:ring-ai-accent/40 focus-visible:ring-2 max-md:min-h-11 pointer-coarse:min-h-11',
           appearance === 'chip' ? 'max-md:h-auto max-md:py-1 max-md:whitespace-normal' : '',
           appearance === 'toggle' && pressed ? 'border-border-strong' : '',
+          narrowIconOnly ? 'max-md:min-w-11 max-md:gap-0' : '',
         ]"
         @click="onClick"
       >
         <template #icon-left>
+          <!-- First in the button, so it anchors to the whole button: an icon-only door's label has no box to hover -->
+          <OTooltip v-if="!touch || (narrowIconOnly && !coarse)" :shortcut-id="shortcutId">
+            <template #content
+              ><span v-for="line in tooltipLines" :key="line" class="block">{{
+                line
+              }}</span></template
+            >
+          </OTooltip>
           <OIcon :name="glyph" size="sm" :class="glyphClass" />
           <OIcon
             v-if="locked"
@@ -102,7 +111,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
           />
         </template>
         <span class="flex min-w-0 flex-col items-start text-start">
-          <span :class="appearance === 'toggle' ? 'max-md:sr-only' : ''">{{ visibleLabel }}</span>
+          <span :class="appearance === 'toggle' || narrowIconOnly ? 'max-md:sr-only' : ''">{{
+            visibleLabel
+          }}</span>
           <span
             v-if="appearance === 'chip'"
             class="text-text-secondary hidden text-xs font-normal max-md:block"
@@ -110,13 +121,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
             >{{ tooltipLines.join(" ") }}</span
           >
         </span>
-        <OTooltip v-if="!touch" :shortcut-id="shortcutId">
-          <template #content
-            ><span v-for="line in tooltipLines" :key="line" class="block">{{
-              line
-            }}</span></template
-          >
-        </OTooltip>
       </OButton>
     </template>
     <AssistantGateState
@@ -177,6 +181,7 @@ export interface AiEntryButtonProps {
   handoff?: () => void | Promise<void>;
   /** Registry id whose keycaps the tooltip shows beside its text. */
   shortcutId?: string;
+  narrowIconOnly?: boolean;
 }
 
 export interface AiEntryButtonEmits {
@@ -517,6 +522,7 @@ const props = withDefaults(defineProps<AiEntryButtonProps>(), {
   size: "sm",
   disabledReason: undefined,
   objectKey: undefined,
+  narrowIconOnly: false,
   handoff: undefined,
   shortcutId: undefined,
 });

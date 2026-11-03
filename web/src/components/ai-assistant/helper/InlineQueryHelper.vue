@@ -922,7 +922,9 @@ function failureLine(state: Extract<HelperState, { kind: "failed" }>): Line {
     );
   if (code === "stream_dropped")
     return failed(
-      t("assistant.helper.dropped", { seconds: Math.max(1, Math.round(state.elapsedMs / 1000)) }),
+      state.elapsedMs < 1_000
+        ? t("assistant.helper.droppedNow")
+        : t("assistant.helper.dropped", { seconds: Math.round(state.elapsedMs / 1000) }),
       ["retry", "write-myself"],
     );
   const known = FAILURE_LINES[code];

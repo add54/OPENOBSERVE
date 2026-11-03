@@ -65,11 +65,6 @@ declare module "./assistantStore.types" {
 /** No frame of any kind for this long shows "No response for {n} s" (HT-01 AC 3). */
 export const STALL_MS = 30_000;
 
-export const ELAPSED_AFTER_MS = 5_000;
-
-/** The turn total joins the live line once the turn has run this long (`30` §3.1). */
-export const TOTAL_AFTER_MS = 30_000;
-
 /** Stopping becomes stopped after the cancel ack or this long (HT-04 AC 3). */
 export const STOP_TIMEOUT_MS = 3_000;
 
@@ -132,8 +127,6 @@ const ANNOUNCED: ReadonlySet<TurnState["state"]> = new Set([
   "reconnecting",
   "stopping",
 ]);
-
-const NO_ELAPSED: ReadonlySet<TurnState["state"]> = new Set(["queued", "reconnecting", "stopping"]);
 
 // Frames that prove the provider answered, so a pending retry or compaction line is over.
 const PROGRESS_FRAMES: ReadonlySet<string> = new Set([
@@ -252,7 +245,8 @@ export interface TurnProgress {
 /** The status row of a live turn; `null` for idle and every terminal (the outcome block owns those). */
 export interface TurnStatusText {
   line: I18nText;
-  second?: I18nText;
+  /** The turn's one total timer; it pauses while the turn waits on the user and hides while it stalls. */
+  elapsed: I18nText | null;
   tone: "neutral" | "warning";
 }
 
@@ -284,15 +278,15 @@ export function turnStatusText(
   progress?: TurnProgress,
 ): TurnStatusText | null {
   if (turn.state === "idle" || isTerminal(turn)) return null;
-  const line = statusLine(turn, meta, t, now, progress);
+  const elapsed = elapsedText(elapsedMs(meta, now), t);
   // Keepalives only prove the transport is open, so a turn sending nothing else still stalls.
   const silentMs = now - (meta.lastByteAt ?? meta.lastFrameAt ?? meta.startedAt ?? now);
   const watching = !turn.state.startsWith("awaiting") && turn.state !== "stopping";
   if (watching && silentMs >= STALL_MS) {
     const n = Math.floor(silentMs / 1000);
-    return { line, second: t("assistant.turn.noResponse", { n }), tone: "warning" };
+    return { line: t("assistant.turn.noResponse", { n }), elapsed: null, tone: "warning" };
   }
-  return { line, tone: "neutral" };
+  return { line: statusLine(turn, meta, t, now, progress), elapsed, tone: "neutral" };
 }
 
 /** The `assistant.step.*` label of a tool; "Running {tool}" when no template fits. */
@@ -440,6 +434,14 @@ export function errorTitle(
   if (error.code === "rate_limited" && error.retryAfterMs)
     return { key: "assistant.error.rate_limited.titleTimed", params };
   const afterChange = failedAfterChange(error) ? AFTER_CHANGE_TITLES[error.code] : undefined;
+  // "after 0 s" reads as a bug, so a drop inside the first second names no time (A5).
+  if (error.code === "stream_dropped" && (copy.elapsedMs ?? 0) < 1_000)
+    return {
+      key: afterChange
+        ? "assistant.error.stream_dropped.titleAfterChangeNow"
+        : "assistant.error.stream_dropped.titleNow",
+      params,
+    };
   if (afterChange) return { key: afterChange, params };
   if (error.code !== "provider_error") return { key: errorTitleKey(error.code), params };
   if (!error.reason) return { key: "assistant.error.provider_error.titleNoReason", params };
@@ -759,6 +761,7 @@ function entryEffects(prev: TurnState, next: TurnState): TurnEffect[] {
   return effects;
 }
 
+// The words change only with the state; the timer sits beside them, never inside (A2).
 function statusLine(
   turn: TurnState,
   meta: TurnMeta,
@@ -768,28 +771,7 @@ function statusLine(
 ): I18nText {
   if (meta.caughtUpAt && now - meta.caughtUpAt < CAUGHT_UP_MS && turn.state !== "reconnecting")
     return t("assistant.turn.caughtUp");
-  const status = stateText(turn, meta, t, now, progress);
-  const total = elapsedMs(meta, now);
-  if (isAwaiting(turn))
-    return total < ELAPSED_AFTER_MS
-      ? status
-      : t("assistant.turn.withElapsed", {
-          status,
-          elapsed: t("assistant.turn.pausedAt", { elapsed: elapsedText(total, t) }),
-        });
-  if (NO_ELAPSED.has(turn.state)) return status;
-  // Without its entry time the state's time is the turn's, so the total would repeat it.
-  const entered = meta.stateEnteredAt ?? null;
-  const inState = entered === null ? total : Math.max(0, now - entered);
-  const timed =
-    inState < ELAPSED_AFTER_MS
-      ? status
-      : t("assistant.turn.withElapsed", { status, elapsed: elapsedText(inState, t) });
-  if (entered === null || total < TOTAL_AFTER_MS) return timed;
-  return t("assistant.turn.withElapsed", {
-    status: timed,
-    elapsed: t("assistant.turn.totalElapsed", { elapsed: elapsedText(total, t) }),
-  });
+  return stateText(turn, meta, t, now, progress);
 }
 
 // The state's own sentence: a step names itself and its number, a pause between steps counts the results.

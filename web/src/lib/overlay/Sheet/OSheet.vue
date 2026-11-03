@@ -34,7 +34,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
         variant="ghost"
         block
         data-sheet-drag
-        class="h-14! shrink-0 cursor-grab touch-none justify-start! rounded-none! px-4"
+        class="h-14! shrink-0 cursor-grab touch-none justify-start! rounded-none! px-4 data-sheet-drag:focus-visible:-outline-offset-2!"
         :data-test="testId('peek-row')"
         @pointerdown="onPointerDown"
         @pointerup="onPointerUp"
@@ -46,7 +46,28 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
         <span class="sr-only">{{ expandLabel }}</span>
       </OButton>
       <div v-show="!peekRow" class="flex min-h-0 flex-1 flex-col">
+        <OButton
+          v-if="handleToggle"
+          variant="ghost"
+          block
+          data-sheet-drag
+          :aria-label="handleName"
+          aria-keyshortcuts="ArrowUp ArrowDown"
+          class="relative h-11! shrink-0 cursor-grab touch-none rounded-none! data-sheet-drag:focus-visible:-outline-offset-2!"
+          :data-test="testId('handle')"
+          @pointerdown="onPointerDown"
+          @pointerup="onPointerUp"
+          @pointercancel="dragStart = null"
+          @click="onHandleClick"
+          @keydown="onHandleKey"
+        >
+          <span
+            aria-hidden="true"
+            class="bg-border-strong rounded-default absolute inset-x-0 top-2 mx-auto h-1 w-9"
+          />
+        </OButton>
         <div
+          v-else
           :data-test="testId('handle')"
           class="relative flex h-11 shrink-0 cursor-grab touch-none items-center justify-end gap-1 px-2"
           @pointerdown="onPointerDown"
@@ -129,6 +150,8 @@ const props = withDefaults(defineProps<OSheetProps>(), {
   closeOnEscape: true,
   inline: false,
   alignTo: null,
+  handleToggle: false,
+  snapLabels: () => ({}),
 });
 
 const emit = defineEmits<OSheetEmits>();
@@ -180,6 +203,13 @@ const smaller = computed(() => {
   return index > 0 ? points.value[index - 1] : null;
 });
 
+// Without the labelled buttons the snap is spoken with the action, so every size is known and reachable by keyboard.
+const handleName = computed(() => {
+  const action = String(larger.value ? props.expandLabel : props.collapseLabel);
+  const at = props.snapLabels[props.snap];
+  return at ? `${action}, ${String(at)}` : action;
+});
+
 function testId(part: string): string {
   return `${props.dataTest}-${part}`;
 }
@@ -197,6 +227,7 @@ function onPointerUp(event: PointerEvent): void {
   if (start === null) return;
   dragged = Math.abs(event.clientY - start) >= DRAG_THRESHOLD;
   if (!dragged) {
+    if (props.handleToggle) return;
     if (props.snap === "peek" && larger.value && !peekRow.value) emit("update:snap", larger.value);
     return;
   }
@@ -222,6 +253,24 @@ function onPeekClick(): void {
   if (larger.value) emit("update:snap", larger.value);
 }
 
+function onHandleClick(): void {
+  if (dragged) {
+    dragged = false;
+    return;
+  }
+  const next = larger.value ?? smaller.value;
+  if (next) emit("update:snap", next);
+}
+
+// Arrow keys reach every snap, peek included, which a tap alone never returns to.
+function onHandleKey(event: KeyboardEvent): void {
+  const next =
+    event.key === "ArrowUp" ? larger.value : event.key === "ArrowDown" ? smaller.value : undefined;
+  if (next === undefined) return;
+  event.preventDefault();
+  if (next) emit("update:snap", next);
+}
+
 // IME candidate lists own their Escape; a persistent or consumer-handled sheet keeps it.
 function onKeydown(event: KeyboardEvent): void {
   if (event.key !== "Escape" || event.isComposing || event.keyCode === 229) return;
@@ -229,6 +278,14 @@ function onKeydown(event: KeyboardEvent): void {
   event.stopPropagation();
   emit("update:open", false);
   emit("dismiss");
+}
+
+function visibleControl(showsPeek: boolean): HTMLElement | null {
+  const el = root.value?.querySelector<HTMLElement>(
+    `[data-test="${testId(showsPeek ? "peek-row" : "handle")}"]`,
+  );
+  if (!el || el.matches("button")) return el ?? null;
+  return el.querySelector<HTMLElement>("button");
 }
 
 function snapHeights(): Record<SheetSnap, number> {
@@ -352,6 +409,13 @@ watch(
     updateOffsets();
   },
 );
+
+// Peek hides the body and the peek row unmounts on expand, so focus inside the sheet moves to whichever control stays shown.
+watch(peekRow, async (showsPeek) => {
+  const hadFocus = !!root.value?.contains(document.activeElement);
+  await nextTick();
+  if (hadFocus) visibleControl(showsPeek)?.focus();
+});
 
 onBeforeUnmount(detach);
 

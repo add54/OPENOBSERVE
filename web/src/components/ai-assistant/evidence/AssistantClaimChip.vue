@@ -21,7 +21,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
     :label="number"
     clickable
     :aria-label="label"
-    :class="['ms-1 align-middle', HIT_AREA, PILL]"
+    :class="['ms-1 align-middle', HIT_AREA]"
     :data-test="`assistant-claim-${n}`"
     :data-call-id="callId"
     @click="open"
@@ -49,17 +49,17 @@ import { revealStep } from "./revealStep";
 const HIT_AREA =
   "relative max-md:before:absolute max-md:before:top-1/2 max-md:before:left-1/2 max-md:before:size-11 max-md:before:-translate-x-1/2 max-md:before:-translate-y-1/2 max-md:before:content-[''] pointer-coarse:before:absolute pointer-coarse:before:top-1/2 pointer-coarse:before:left-1/2 pointer-coarse:before:size-11 pointer-coarse:before:-translate-x-1/2 pointer-coarse:before:-translate-y-1/2 pointer-coarse:before:content-['']";
 
-const PILL = "bg-text-link/12 text-assistant-link border-transparent font-medium";
-
 const props = defineProps<{
   n: number;
+  /** The last number of a collapsed run; the chip then reads "14–24". */
+  to?: number;
   callId: string;
   available: boolean;
   /** "Citation 1, query 1, 3 rows". */
   label: I18nText;
 }>();
 
-const number = computed(() => raw(String(props.n)));
+const number = computed(() => raw(props.to ? `${props.n}–${props.to}` : String(props.n)));
 
 function open(event: MouseEvent | KeyboardEvent): void {
   const from = event.currentTarget instanceof HTMLElement ? event.currentTarget : null;

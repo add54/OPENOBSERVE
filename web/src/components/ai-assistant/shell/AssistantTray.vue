@@ -20,13 +20,13 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
     ref="root"
     :aria-label="t('assistant.tray.label')"
     data-test="assistant-tray"
-    class="fixed end-[calc(var(--o-tray-end)*1rem)] bottom-2 z-5000 flex items-center gap-2"
+    class="fixed end-[calc((var(--o-tray-end,0)+0.75)*1rem)] bottom-3 z-5000 flex items-center gap-2"
   >
     <div
       v-for="(bar, index) in shown"
       :key="bar.sid"
       data-test="assistant-tray-bar"
-      class="bg-surface-base border-border-default rounded-surface flex h-10 w-60 min-w-0 items-center gap-1 border ps-1 pe-1 shadow-lg"
+      class="bg-surface-base border-border-default rounded-surface flex h-10 w-60 min-w-0 items-center gap-1.5 border ps-1 pe-1 shadow-lg"
     >
       <OButton
         :ref="(el) => setBar(index, el)"

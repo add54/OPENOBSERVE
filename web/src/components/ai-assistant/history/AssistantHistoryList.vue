@@ -21,6 +21,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
     :role="mode === 'panel' ? 'region' : undefined"
     :aria-label="mode === 'panel' ? t('assistant.history.view.title') : undefined"
     :data-mode="mode"
+    :data-narrow="narrow ? '' : undefined"
     :data-readonly="readonly ? '' : undefined"
     data-dd-privacy="mask"
     data-test="assistant-history"
@@ -38,43 +39,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
         @update:model-value="(q) => history.setFilter({ q })"
         @keydown="onSearchKey"
       />
-      <ODropdown v-if="filterShown" align="end">
-        <template #trigger>
-          <OButton
-            variant="ghost"
-            size="xs"
-            :icon-left="assistantGlyph.filter"
-            :aria-label="filterName"
-            :class="[
-              'shrink-0 max-md:min-h-11 pointer-coarse:min-h-11',
-              activeFilters.length && 'text-assistant-link',
-            ]"
-            data-test="assistant-history-filter"
-          >
-            <span v-if="!narrow">{{ filterName }}</span>
-          </OButton>
-        </template>
-        <ODropdownGroup
-          v-for="section in filterSections"
-          :key="section.id"
-          :label="section.label"
-          :data-test="`assistant-history-filter-${section.id}`"
-        >
-          <ODropdownItem
-            v-for="choice in section.choices"
-            :key="choice.id"
-            role="menuitemradio"
-            :aria-checked="choice.checked"
-            :data-test="`assistant-history-filter-${choice.id}`"
-            @select="choice.toggle"
-          >
-            {{ choice.label }}
-            <template v-if="choice.checked" #icon-right>
-              <OIcon :name="assistantGlyph.done" size="sm" class="text-assistant-link ms-auto" />
-            </template>
-          </ODropdownItem>
-        </ODropdownGroup>
-      </ODropdown>
       <ODropdown align="end">
         <template #trigger>
           <AssistantIconButton
@@ -120,6 +84,43 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
         </template>
       </ODropdown>
     </div>
+    <ODropdown v-if="toolsShown && filterShown" align="start">
+      <template #trigger>
+        <OButton
+          variant="ghost"
+          size="xs"
+          :icon-left="assistantGlyph.filter"
+          :aria-label="filterName"
+          :class="[
+            '-ms-1 shrink-0 self-start max-md:min-h-11 pointer-coarse:min-h-11',
+            activeFilters.length && 'text-assistant-link',
+          ]"
+          data-test="assistant-history-filter"
+        >
+          {{ filterName }}
+        </OButton>
+      </template>
+      <ODropdownGroup
+        v-for="section in filterSections"
+        :key="section.id"
+        :label="section.label"
+        :data-test="`assistant-history-filter-${section.id}`"
+      >
+        <ODropdownItem
+          v-for="choice in section.choices"
+          :key="choice.id"
+          role="menuitemradio"
+          :aria-checked="choice.checked"
+          :data-test="`assistant-history-filter-${choice.id}`"
+          @select="choice.toggle"
+        >
+          {{ choice.label }}
+          <template v-if="choice.checked" #icon-right>
+            <OIcon :name="assistantGlyph.done" size="sm" class="text-assistant-link ms-auto" />
+          </template>
+        </ODropdownItem>
+      </ODropdownGroup>
+    </ODropdown>
 
     <div ref="scroller" class="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
       <h2 v-if="mode === 'rail'" class="sr-only">{{ t("assistant.history.title") }}</h2>

@@ -19,6 +19,7 @@ import { computed, ref } from "vue";
 
 import type { AssistantCapability, GateCode, Starter } from "@/composables/assistant";
 import OSkeleton from "@/lib/feedback/Skeleton/OSkeleton.vue";
+import { toast } from "@/lib/feedback/Toast/useToast";
 import type { HistoryDeps } from "@/composables/assistant/useAssistantHistory";
 import { raw } from "@/types/i18n";
 
@@ -71,6 +72,10 @@ vi.mock("@/composables/assistant", async (importOriginal) => ({
       scope: computed(() => ({ org: "default", streamCount: 3, timeRange: null, canWrite: "yes" })),
     };
   },
+}));
+vi.mock("@/lib/feedback/Toast/useToast", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/feedback/Toast/useToast")>()),
+  toast: vi.fn(),
 }));
 vi.mock("@/services/assistantAnalytics", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/assistantAnalytics")>()),
@@ -1038,34 +1043,69 @@ describe("AssistantShell decision cards", () => {
     });
   });
 
-  it("keeps Review request in the strip while a card waits, and it lands on the heading", async () => {
+  const CARD = '[data-test="assistant-approval-card"]';
+
+  // The card's own observer; `seen(false)` scrolls the card out of the transcript's view.
+  function observeCard(): { seen: (visible: boolean) => void } {
+    const watched = new Map<Element, IntersectionObserverCallback>();
+    vi.stubGlobal(
+      "IntersectionObserver",
+      class {
+        constructor(private readonly cb: IntersectionObserverCallback) {}
+        observe = (el: Element) => watched.set(el, this.cb);
+        disconnect = () => undefined;
+      },
+    );
+    return {
+      seen: (visible) => {
+        const [, callback] =
+          [...watched].find(([el]) => el.matches(CARD) || !!el.querySelector(CARD)) ?? [];
+        callback?.(
+          [{ isIntersecting: visible } as IntersectionObserverEntry],
+          {} as IntersectionObserver,
+        );
+      },
+    };
+  }
+
+  it("offers Review in the strip only while the card is out of view, and it lands on the heading (C1)", async () => {
+    const card = observeCard();
     const { wrapper } = await mountWithCard();
     const close = wrapper.get('[data-test="assistant-shell-close"]').element as HTMLElement;
     close.focus();
     await flushPromises();
+    expect(wrapper.find('[data-test="assistant-strip-review"]').exists()).toBe(false);
+    card.seen(false);
+    await flushPromises();
     const review = wrapper.get('[data-test="assistant-strip-review"]');
-    expect(review.text()).toMatch(/^Review request · expires in \d+:\d\d$/);
+    expect(review.text()).toMatch(/^Review · \d+:\d\d$/);
     expect(review.attributes("aria-label")).toBe("Review request");
+    expect(wrapper.find('[data-test="assistant-sticky-status"]').exists()).toBe(false);
     await review.trigger("click");
     await flushPromises();
     expect(document.activeElement).toBe(
       wrapper.get('[data-test="assistant-approval-card"] h3').element,
     );
-    // It never leaves while the card waits, so the strip cannot shift under a pointer.
-    expect(wrapper.find('[data-test="assistant-strip-review"]').exists()).toBe(true);
+    card.seen(true);
+    await flushPromises();
+    expect(wrapper.find('[data-test="assistant-strip-review"]').exists()).toBe(false);
+    vi.unstubAllGlobals();
   });
 
-  it("names a waiting question Needs you in the strip, never Review request", async () => {
+  it("labels a waiting question's strip button Review too, and names it Needs you", async () => {
+    const card = observeCard();
     const { wrapper, store, sid } = await mountWithCard();
     Object.assign(store.state.sessions[sid].pendingApproval!, {
       kind: "question",
       message: "Which stream type should I list?",
       options: [{ id: "logs", label: "Logs" }],
     });
+    card.seen(false);
     await flushPromises();
     const review = wrapper.get('[data-test="assistant-strip-review"]');
-    expect(review.text()).toMatch(/^Needs you · \d+:\d\d$/);
+    expect(review.text()).toMatch(/^Review · \d+:\d\d$/);
     expect(review.attributes("aria-label")).toBe("Needs you");
+    vi.unstubAllGlobals();
   });
 
   it("leads back from a request reached from another chat, under its record alone", async () => {
@@ -1107,6 +1147,24 @@ describe("AssistantShell decision cards", () => {
     expect(wrapper.find('[data-test="assistant-approval-card"]').exists()).toBe(false);
     await wrapper.get('[data-test="assistant-approval-result-stop"]').trigger("click");
     expect(stopElsewhere).toHaveBeenCalledWith(sid);
+  });
+
+  it("says so when Stop on another tab's turn could not cancel it (R3)", async () => {
+    setRuntimeHandle({
+      lifecycle: {
+        signedOutElsewhere: computed(() => false),
+        otherAccountSignedIn: computed(() => false),
+        turnLock: () => "approval_elsewhere",
+        stopElsewhere: vi.fn(async () => false),
+      },
+    } as never);
+    const { wrapper } = await mountWithCard("none");
+    await wrapper.get('[data-test="assistant-approval-result-stop"]').trigger("click");
+    await flushPromises();
+    expect(toast).toHaveBeenCalledWith({
+      variant: "error",
+      message: "Couldn't stop the other answer. Try again.",
+    });
   });
 
   it("renders the consent card named by its org, and Cancel declines through the store", async () => {
@@ -1262,6 +1320,26 @@ describe("AssistantShell history states", () => {
       "Answering in another tab",
     );
     expect(wrapper.find('[data-test="assistant-shell-elsewhere-stop"]').exists()).toBe(true);
+  });
+
+  it("reads a run this tab started before a reload as its own, in one place only (B1)", async () => {
+    const { wrapper, store } = setup();
+    const sid = open(store);
+    vi.spyOn(fake.current.history, "elsewhere").mockReturnValue({
+      mode: "polling",
+      evidence: false,
+      approval: false,
+      turnId: "t",
+      ownedHere: true,
+    });
+    store.state.sessions[sid].turn = { state: "responding.writing" } as never;
+    store.state.sessions[sid].turnMeta.ownedByThisTab = false;
+    await flushPromises();
+    expect(wrapper.get('[data-test="assistant-shell-elsewhere-status"]').text()).toBe(
+      "Still answering. This view refreshes every few seconds.",
+    );
+    expect(wrapper.text()).not.toContain("another tab");
+    expect(wrapper.find('[data-test="assistant-sticky-status"]').exists()).toBe(false);
   });
 
   it("says Reconnecting, never another tab, until a live owner shows (PO B3)", async () => {

@@ -145,6 +145,11 @@ describe("assistant service", () => {
     );
   });
 
+  it("cancels without turn_id when the caller does not know the running turn", async () => {
+    await assistant.cancelTurn("org1", "s", null);
+    expect(api.post).toHaveBeenCalledWith("/api/org1/ai/chats/s/cancel", {}, expect.anything());
+  });
+
   it("rejects when the cancel fails, so the caller can report it unconfirmed", async () => {
     api.post.mockRejectedValue(httpError(503));
     await expect(assistant.cancelTurn("org1", "s", "t")).rejects.toBeDefined();

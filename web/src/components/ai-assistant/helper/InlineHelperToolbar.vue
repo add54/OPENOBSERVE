@@ -37,8 +37,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
       entry-kind="editor_button"
       object-kind="query"
       :build="noPayload"
-      :label="t('assistant.helper.door')"
-      :tooltip="t('assistant.helper.doorTooltip')"
+      :label="door.label"
+      :tooltip="door.tooltip"
+      :narrow-icon-only="inline"
       :shortcut-id="dockOpen ? undefined : 'assistantHelper'"
       :disabled-reason="blocked ?? undefined"
       :handoff="() => emit('open')"
@@ -72,11 +73,13 @@ export interface InlineHelperToolbarEmits {
 </script>
 
 <script setup lang="ts">
+import { computed } from "vue";
+
 import AiEntryButton from "@/components/ai-assistant/entry/AiEntryButton.vue";
 import AiLabel from "@/components/ai-assistant/entry/AiLabel.vue";
 import { useI18nTyped } from "@/types/i18n";
 
-withDefaults(defineProps<InlineHelperToolbarProps>(), {
+const props = withDefaults(defineProps<InlineHelperToolbarProps>(), {
   hostId: undefined,
   inline: false,
   reserveEnd: false,
@@ -85,4 +88,13 @@ const emit = defineEmits<InlineHelperToolbarEmits>();
 
 const { t } = useI18nTyped();
 const noPayload = () => undefined;
+// The function editor writes a VRL function, not a query, so its door names that.
+const door = computed(() =>
+  props.hostId === "function"
+    ? {
+        label: t("assistant.helper.doorFunction"),
+        tooltip: t("assistant.helper.doorFunctionTooltip"),
+      }
+    : { label: t("assistant.helper.door"), tooltip: t("assistant.helper.doorTooltip") },
+);
 </script>

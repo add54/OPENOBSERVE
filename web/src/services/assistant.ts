@@ -482,10 +482,11 @@ const assistant = {
   },
 
   /** Stop on the server; JSON, because a cross-site form post cannot send that content type (constraint 15). */
-  cancelTurn: async (org: string, sid: string, turnId: string): Promise<void> => {
+  cancelTurn: async (org: string, sid: string, turnId?: string | null): Promise<void> => {
+    // The server refuses an empty `turn_id`; without one it cancels whatever turn the chat runs.
     await http().post(
       `/api/${enc(org)}/ai/chats/${enc(sid)}/cancel`,
-      { turn_id: turnId },
+      turnId ? { turn_id: turnId } : {},
       { ...KEEPALIVE_REQUEST, headers: { "x-o2-assistant-session-id": sid } },
     );
   },

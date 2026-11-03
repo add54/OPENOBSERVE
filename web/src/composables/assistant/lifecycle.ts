@@ -114,7 +114,7 @@ export interface AssistantLifecycleRuntime extends AssistantLifecycle {
   /** True while another tab holds this session's approval card. */
   approvalElsewhere(sid: Sid): boolean;
   /** Stop on a turn another tab's card holds: that tab declines the card first, then the turn is cancelled. */
-  stopElsewhere(sid: Sid): Promise<void>;
+  stopElsewhere(sid: Sid): Promise<boolean>;
   /** Why no turn may start in `sid` from this tab right now, or `null`. */
   turnLock(sid: Sid | null): TurnLockReason | null;
   dispose(): void;
@@ -370,9 +370,9 @@ export function createLifecycle(deps: LifecycleDeps): AssistantLifecycleRuntime 
       });
       clearTimeout(timer);
       off();
-      if (answered) return;
+      if (answered) return true;
       remote.delete(sid);
-      await store.cancelTurn(sid, null);
+      return store.cancelTurn(sid, null);
     },
     turnLock(sid) {
       if (otherAccount.value) return "account_changed";

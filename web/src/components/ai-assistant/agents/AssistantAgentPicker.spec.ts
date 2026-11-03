@@ -58,7 +58,10 @@ const ROSTER: CapabilityAgent[] = [
 
 const stubs = {
   ODropdown: { template: '<div><slot name="trigger" /><slot /></div>' },
-  ODropdownGroup: { props: ["label"], template: "<div>{{ label }}<slot /></div>" },
+  ODropdownGroup: {
+    props: ["label"],
+    template: '<div>{{ label }}<slot name="label-action" /><slot /></div>',
+  },
   ODropdownItem: {
     props: ["description"],
     emits: ["select"],
@@ -116,6 +119,24 @@ describe("AssistantAgentPicker", () => {
     expect(wrapper.findAll('[role="option"]')).toHaveLength(3);
     expect(option(wrapper, "o2-ai").attributes("aria-selected")).toBe("true");
     expect(option(wrapper, "o2-ai").classes()).toContain("bg-dropdown-item-hover-bg");
+  });
+
+  it("says a policy every agent shares once, and gives each row its purpose on a second line", () => {
+    const shared = ROSTER.map((agent) => ({ ...agent, readOnly: false }));
+    const { wrapper } = setup(shared);
+    expect(wrapper.get('[data-test="assistant-agent-shared-policy"]').text()).toBe(
+      "Asks before changing anything",
+    );
+    expect(option(wrapper, "generate-query").text()).not.toContain("Asks before");
+    expect(
+      option(wrapper, "generate-query").get('[data-test="assistant-agent-option-clause"]').text(),
+    ).toBe("Writes queries");
+    expect(
+      option(wrapper, "o2-ai").find('[data-test="assistant-agent-option-clause"]').exists(),
+    ).toBe(false);
+    expect(setup().wrapper.find('[data-test="assistant-agent-shared-policy"]').exists()).toBe(
+      false,
+    );
   });
 
   it("sets a new chat's agent without sending, and announces it", async () => {

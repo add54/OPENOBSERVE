@@ -608,6 +608,10 @@ function createCore(
       const pendingAgent = session.nextAgentId ?? session.agentId;
       // A reply is not a draft: the one kept is the text Reply set aside.
       const text = mode === "reply" ? (replyStash ?? "") : session.composer.text;
+      const unsent =
+        session.messages.length === 0 &&
+        !core.released.has(session.sid) &&
+        !session.record.serverBacked;
       core.drafts.schedule(session.userOrgKey, session.sid, {
         text,
         chips,
@@ -616,6 +620,7 @@ function createCore(
         imageCount: images.length,
         ...(homeStarter && mode !== "reply" && { homeStarter: true }),
         ...(pendingAgent && { agentId: pendingAgent }),
+        ...(unsent && { unsent: true }),
       });
     },
     persistPlacement() {
@@ -1412,7 +1417,9 @@ function createLifecycleSlice(core: StoreCore, openSession: AssistantStoreApi["o
     else if (stored?.placement.kind === "docked" && stored.previousPlacement?.kind === "sidebar")
       state.shell.placement = { ...stored.previousPlacement };
     const selected = recallSelection(userOrgKey);
-    if (selected)
+    // A chat that never sent anything has no history, so reading it would only fetch a 404.
+    if (selected && core.drafts.read(userOrgKey, selected)?.unsent) reviveDraft(core, selected);
+    else if (selected)
       void openSession({ sid: selected }).catch((err: unknown) =>
         afterOpenFailed(core, selected, err),
       );
@@ -1744,7 +1751,7 @@ function restoreStoredDraft(core: StoreCore, sid: Sid): void {
   if (!session || !core.writable(session) || session.composer.text) return;
   const draft = core.drafts.read(session.userOrgKey, sid);
   if (!draft) return;
-  const { imageCount = 0, agentId, ...stored } = draft;
+  const { imageCount = 0, agentId, unsent: _unsent, ...stored } = draft;
   Object.assign(session.composer, stored);
   // A pick survives a reload the way its draft does; on a chat with turns it is still only Next.
   if (agentId && session.messages.length === 0) session.agentId = agentId;

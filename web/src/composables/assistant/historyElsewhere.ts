@@ -21,6 +21,8 @@ export const POLL_FAST_MS = 4_000;
 export const POLL_SLOW_MS = 15_000;
 export const POLL_FAST_FOR_MS = 60_000;
 export const POLL_STOP_MS = 10 * 60_000;
+/** A stalled follow still reads this rarely, so a turn that ended unseen stops reading as answering (B3). */
+export const POLL_STALLED_MS = 5 * 60_000;
 /** Without Web Locks, a chat followed by hints alone is released when no hint has spoken for this long. */
 export const HINT_STALE_MS = 150_000;
 /** A `turn_heartbeat` is evidence of a live owner for this long (D1 decision 13). */
@@ -38,6 +40,8 @@ export interface ElsewhereView {
   turnId: string | null;
   /** Positive evidence of a live owner: a recent heartbeat, or the server naming another client. */
   evidence?: boolean;
+  /** The server names this tab's own client id, which a reload keeps: the run is this tab's, not another's. */
+  ownedHere?: boolean;
 }
 
 export interface ElsewhereDeps {
@@ -115,6 +119,8 @@ export function createElsewhere(deps: ElsewhereDeps): Elsewhere {
 
   const isOtherClient = (owner: string | null | undefined) =>
     !!owner && !!deps.clientId && owner !== deps.clientId();
+  const isThisClient = (owner: string | null | undefined) =>
+    !!owner && !!deps.clientId && owner === deps.clientId();
 
   // A browser-only chat has no server owner: the hints and the turn lock that keep it followed are its evidence.
   const refreshEvidence = (sid: Sid) => {
@@ -131,6 +137,7 @@ export function createElsewhere(deps: ElsewhereDeps): Elsewhere {
     if (age >= POLL_STOP_MS) {
       if (views[sid]) views[sid].mode = "stalled";
       watcher.release?.();
+      watcher.timer = setTimeout(() => void tick(sid), POLL_STALLED_MS);
       return;
     }
     watcher.timer = setTimeout(() => void tick(sid), delayOf(watcher));
@@ -177,10 +184,11 @@ export function createElsewhere(deps: ElsewhereDeps): Elsewhere {
     if (result && views[sid]) {
       views[sid].approval = result.approval;
       views[sid].turnId = result.turnId ?? views[sid].turnId;
+      views[sid].ownedHere = isThisClient(result.ownerClientId);
       watcher.ownedElsewhere = isOtherClient(result.ownerClientId);
       refreshEvidence(sid);
     }
-    takeTail(sid);
+    if (views[sid]?.mode !== "stalled") takeTail(sid);
     schedule(sid);
   };
 
@@ -234,7 +242,8 @@ export function createElsewhere(deps: ElsewhereDeps): Elsewhere {
       } else if (views[sid]?.mode !== "stalled") {
         if (deps.now() - watcher.readAt >= delayOf(watcher)) void tick(sid);
         else schedule(sid);
-      }
+      } else if (deps.now() - watcher.readAt >= POLL_STALLED_MS) void tick(sid);
+      else schedule(sid);
     }
   });
 
@@ -247,7 +256,10 @@ export function createElsewhere(deps: ElsewhereDeps): Elsewhere {
       if (known && views[sid]) {
         views[sid].approval = approval;
         views[sid].turnId = turnId ?? views[sid].turnId;
-        if (ownerClientId !== undefined) known.ownedElsewhere = isOtherClient(ownerClientId);
+        if (ownerClientId !== undefined) {
+          known.ownedElsewhere = isOtherClient(ownerClientId);
+          views[sid].ownedHere = isThisClient(ownerClientId);
+        }
         refreshEvidence(sid);
         armStale(sid);
         return;
@@ -260,7 +272,12 @@ export function createElsewhere(deps: ElsewhereDeps): Elsewhere {
         beating: false,
         ownedElsewhere: isOtherClient(ownerClientId),
       });
-      views[sid] = { approval, turnId, mode: polls ? "polling" : "hint" };
+      views[sid] = {
+        approval,
+        turnId,
+        mode: polls ? "polling" : "hint",
+        ownedHere: isThisClient(ownerClientId),
+      };
       refreshEvidence(sid);
       takeTail(sid);
       schedule(sid);

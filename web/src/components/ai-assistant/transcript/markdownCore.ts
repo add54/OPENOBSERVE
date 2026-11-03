@@ -397,6 +397,11 @@ export function plainResult(blockId: string, text: string): ParseResult {
   return { parts, claims: [], plain: text };
 }
 
+/** Plain text with its `[^id]` claim markers removed, for places that show model text without chips. */
+export function stripClaimMarkers(text: string): string {
+  return text.replace(CLAIM_MARKER, "");
+}
+
 /** A text part; runs longer than MAX_RUN_CHARS are split into segments the message joins with `<wbr>`. */
 export function textPart(key: string, text: string): Extract<MarkdownPart, { kind: "text" }> {
   const segments = runSegments(text);

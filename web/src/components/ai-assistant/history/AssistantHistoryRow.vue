@@ -55,8 +55,10 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
           class="h-auto! min-h-8 min-w-0 flex-1 justify-start! py-1.5 text-start max-md:min-h-11 pointer-coarse:min-h-11"
           data-test="assistant-history-row"
           :aria-disabled="org ? 'true' : undefined"
-          @click="!org && emit('open', row.sid)"
-          @keydown="(event: KeyboardEvent) => emit('navigate', event)"
+          @click="choose"
+          @keydown="onRowKey"
+          @pointerleave="chosen = false"
+          @blur="chosen = false"
         >
           <span class="flex min-w-0 flex-1 items-center gap-2">
             <OIcon
@@ -68,9 +70,12 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
               data-test="assistant-history-row-agent"
             />
             <span class="flex min-w-0 flex-1 flex-col">
-              <OTruncatedText class="text-text-body min-w-12" :tooltip="fullTitle">{{
-                row.title
-              }}</OTruncatedText>
+              <!-- A chosen row moves as the list re-sorts, so its bubble would be left over the nav (X1) -->
+              <OTruncatedText
+                class="text-text-body min-w-12"
+                :tooltip="chosen ? false : fullTitle"
+                >{{ row.title }}</OTruncatedText
+              >
               <OText v-if="org" variant="meta" as="span" data-test="assistant-history-row-org">
                 {{ org }}
               </OText>
@@ -86,7 +91,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
             <span
               v-else-if="status"
               :class="[
-                'group-hover/row:text-text-body shrink-0 text-xs tabular-nums',
+                'group-hover/row:text-text-body min-w-12 shrink-0 text-end text-xs tabular-nums',
                 chatStatusClass(status, current),
               ]"
               :data-status="status"
@@ -97,7 +102,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
               v-else
               variant="meta"
               as="span"
-              class="shrink-0 tabular-nums"
+              class="w-12 shrink-0 text-end tabular-nums"
               data-test="assistant-history-row-time"
               >{{ time }}</OText
             >
@@ -270,6 +275,7 @@ const kebab = ref<InstanceType<typeof AssistantIconButton> | null>(null);
 const renaming = ref(false);
 const armed = ref(false);
 const menuOpen = ref(false);
+const chosen = ref(false);
 const draft = ref("");
 let cancelled = false;
 
@@ -345,6 +351,17 @@ async function openMenuSoon(): Promise<void> {
   armed.value = true;
   await nextTick();
   menuOpen.value = true;
+}
+
+function choose(): void {
+  if (props.org) return;
+  chosen.value = true;
+  emit("open", props.row.sid);
+}
+
+function onRowKey(event: KeyboardEvent): void {
+  if (event.key === "Enter" || event.key === " ") chosen.value = true;
+  emit("navigate", event);
 }
 
 // The menu returns focus to its trigger as it closes; the field waits for that.

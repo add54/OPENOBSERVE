@@ -311,6 +311,8 @@ function markReplayStatus(turn: StoredTurn, messages: ChatMessage[], state: Stre
     return;
   }
   if (turn.status === "completed" || (has("complete") && turn.status !== "failed")) return;
+  // The server reports a stale run as `interrupted`, so a `running` turn is still live and not dropped.
+  if (turn.status === "running" && !has("error")) return;
   const failed = turn.status === "failed" || has("error");
   const errorType = failed ? storedErrorCode(turn) : "stream_dropped";
   appendMarker(messages, 0, { type: "error", errorType });

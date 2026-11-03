@@ -126,6 +126,7 @@ export {
   promptRange,
   queryCount,
   stateOf,
+  trailRowCount,
   stepsOf,
   toolLinksOf,
   turnAnnotationKey,

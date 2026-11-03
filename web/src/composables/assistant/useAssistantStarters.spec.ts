@@ -198,7 +198,7 @@ describe("useAssistantStarters", () => {
   });
 
   it("grounds Home on streams the org has, skips internal ones and stages the hour it names", async () => {
-    seedStreams("logs", ["_o2_internal", "k8s"]);
+    seedStreams("logs", ["_o2_internal", "_agent_signals", "k8s"]);
     seedStreams("traces", ["_o2_spans", "checkout"]);
     const { starters } = setup("home", null);
     await flushPromises();
@@ -214,6 +214,14 @@ describe("useAssistantStarters", () => {
       streamType: "traces",
     });
     expect(labels(starters).join(" ")).not.toContain("_o2_");
+    expect(labels(starters).join(" ")).not.toContain("_agent_signals");
+  });
+
+  it("names and counts a user's own underscore stream, skipping only what the shared rule calls internal (X3)", async () => {
+    seedStreams("logs", ["_o2_internal", "_agent_signals", "_myapp"]);
+    const { starters } = setup("home", null);
+    await flushPromises();
+    expect(labels(starters)).toContain("Summarise errors in `_myapp`");
   });
 
   it("stages Home starter streams so they reach the tray and the request from the full view", async () => {

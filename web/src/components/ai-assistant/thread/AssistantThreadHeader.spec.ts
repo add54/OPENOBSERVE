@@ -122,6 +122,16 @@ describe("AssistantThreadHeader", () => {
     expect(wrapper.find('[data-test="assistant-thread-menu-rename"]').exists()).toBe(false);
   });
 
+  it("hangs the title tooltip on the whole title button, not on its chevron", async () => {
+    const { wrapper } = await setup();
+    const button = wrapper.get(title).element;
+    // jsdom computes no display:contents, so the anchor may be OButton's contents wrapper instead of the button.
+    const trigger = button.hasAttribute("data-o-tooltip-trigger")
+      ? button
+      : button.querySelector("[data-o-tooltip-trigger]");
+    expect(trigger?.querySelector('[data-test="assistant-thread-title-text"]')).not.toBeNull();
+  });
+
   it("keeps the title button a 2.75 rem target below md and on coarse pointers", async () => {
     const { wrapper } = await setup();
     const classes = wrapper.get(title).classes();

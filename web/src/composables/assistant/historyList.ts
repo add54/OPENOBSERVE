@@ -71,6 +71,7 @@ export function createHistoryList(ctx: HistoryCtx) {
   // The chats the owner's share links point at; a listed row carries no share of its own.
   const sharedSids = shallowRef<ReadonlySet<Sid>>(new Set());
   const loadedFor = ref<string | null>(null);
+  let wanted = false;
 
   const searchOnServer = () => deps.capability().historySearch === true;
 
@@ -106,6 +107,7 @@ export function createHistoryList(ctx: HistoryCtx) {
   };
 
   const ensureLoaded = () => {
+    wanted = true;
     const org = deps.org();
     const userOrgKey = ctx.key();
     if (!org || !userOrgKey) return;
@@ -219,6 +221,8 @@ export function createHistoryList(ctx: HistoryCtx) {
     ([userOrgKey]) => {
       reset();
       filterState.value = (userOrgKey && readHistoryFilter(userOrgKey)) || { kind: "all", q: "" };
+      // A view that asked before identity or capability settled still needs the list after the reset.
+      if (wanted) ensureLoaded();
     },
   );
 

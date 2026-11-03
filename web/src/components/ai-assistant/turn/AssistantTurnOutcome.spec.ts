@@ -252,11 +252,15 @@ describe("AssistantTurnOutcome", () => {
     ).toBe(false);
   });
 
-  it("uses the Calm Signal looks and suppresses the banner's own role (`30` §4.2, `95` §2.3)", () => {
+  it("draws a failure as a plain row and a refusal as a banner without its own role (`30` §4.2, `95` §2.3)", () => {
     const failed = mountOutcome({ kind: "failed", error: error("unknown") });
-    expect(failed.attributes("role")).toBe("presentation");
-    expect(failed.classes().join(" ")).toContain("bg-banner-error-soft-bg");
+    expect(failed.attributes("role")).toBeUndefined();
+    expect(failed.classes().join(" ")).not.toMatch(/bg-banner|border/);
+    expect(
+      failed.get('[data-test="assistant-turn-outcome-action"]').classes().join(" "),
+    ).not.toMatch(/w-full/);
     const refused = mountOutcome({ kind: "refused", error: error("offline") });
+    expect(refused.attributes("role")).toBe("presentation");
     expect(refused.classes().join(" ")).toContain("bg-banner-info-bg");
   });
 
@@ -405,11 +409,15 @@ describe("AssistantTurnOutcome", () => {
     ]);
   });
 
-  it("puts the action before Details in reading and tab order (`30` §4.4, HT-10 AC 5)", () => {
+  it("keeps a failure's Details on its row and ends the row with the action", () => {
     const wrapper = mountOutcome({ error: error("agent_unavailable") });
-    const action = buttons(wrapper)[0].element;
+    const action = wrapper.get('[data-test="assistant-turn-outcome-action"]').element;
     const details = wrapper.get('[data-test="assistant-error-details-trigger"]').element;
-    expect(action.compareDocumentPosition(details) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(details.compareDocumentPosition(action) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const titleRow = wrapper.get('[data-test="assistant-turn-outcome-title"]').element
+      .parentElement!.parentElement!;
+    expect(titleRow.contains(details)).toBe(true);
+    expect(wrapper.find('[data-test="assistant-turn-outcome-meta"]').exists()).toBe(false);
   });
 
   it("keeps the action in the title row and the hint, manual route and Details in one meta row (D7 §3.1)", () => {

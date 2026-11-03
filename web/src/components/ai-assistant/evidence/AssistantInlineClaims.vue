@@ -16,22 +16,30 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 <template>
   <span ref="anchor" hidden />
-  <Teleport v-for="target in targets" :key="target.id" :to="target.el">
+  <Teleport v-for="chip in chips" :key="chip.target.id" :to="chip.target.el">
     <AssistantClaimChip
-      :n="numbers.get(target.callId) ?? 0"
-      :call-id="target.callId"
-      :available="available(target.callId)"
-      :label="label(target.callId)"
+      :n="chip.from"
+      :to="chip.to"
+      :call-id="chip.target.callId"
+      :available="available(chip.target.callId)"
+      :label="
+        chip.to
+          ? t('assistant.claim.range', { from: chip.from, to: chip.to })
+          : label(chip.target.callId)
+      "
     />
   </Teleport>
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 
-import type { I18nText } from "@/types/i18n";
+import { useI18nTyped, type I18nText } from "@/types/i18n";
 
 import AssistantClaimChip from "./AssistantClaimChip.vue";
+
+/** A run of this many consecutive numbers, cited side by side, reads as one range chip. */
+const MIN_RUN = 3;
 
 interface ClaimSlot {
   id: number;
@@ -47,11 +55,46 @@ const props = defineProps<{
   label: (callId: string) => I18nText;
 }>();
 
+const { t } = useI18nTyped();
 const anchor = ref<HTMLElement | null>(null);
 const targets = shallowRef<ClaimSlot[]>([]);
 const ids = new WeakMap<Element, number>();
 let nextId = 0;
 let observer: MutationObserver | null = null;
+
+// Each run of MIN_RUN or more adjacent consecutive numbers keeps its first slot as a range chip; the rest render nothing.
+const chips = computed(() => {
+  const slots = targets.value;
+  const result: { target: ClaimSlot; from: number; to?: number }[] = [];
+  let start = 0;
+  while (start < slots.length) {
+    let end = start;
+    while (end + 1 < slots.length && continues(slots[end], slots[end + 1])) end++;
+    const from = numberOf(slots[start]);
+    if (end - start + 1 >= MIN_RUN) {
+      result.push({ target: slots[start], from, to: numberOf(slots[end]) });
+    } else {
+      for (let index = start; index <= end; index++)
+        result.push({ target: slots[index], from: numberOf(slots[index]) });
+    }
+    start = end + 1;
+  }
+  return result;
+});
+
+function numberOf(slot: ClaimSlot): number {
+  return props.numbers.get(slot.callId) ?? 0;
+}
+
+// Only whitespace may sit between two slots for them to read as one run.
+function continues(before: ClaimSlot, after: ClaimSlot): boolean {
+  const n = numberOf(before);
+  if (!n || numberOf(after) !== n + 1) return false;
+  let node = after.el.previousSibling;
+  while (node && node.nodeType === Node.TEXT_NODE && !node.textContent?.trim())
+    node = node.previousSibling;
+  return node === before.el;
+}
 
 // Parts fill outside Vue and may replace their slots, so the slots are found again after every fill.
 function scan(): void {

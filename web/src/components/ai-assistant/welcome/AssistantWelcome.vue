@@ -19,12 +19,15 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
     data-test="assistant-welcome"
     :data-variant="variant"
     :data-fresh="fresh ? '' : undefined"
-    :aria-label="t('assistant.welcome.suggestions')"
+    :aria-labelledby="headingId"
     :class="[
-      'flex min-h-full flex-col justify-end px-3 pb-1',
+      'flex min-h-full flex-col justify-end gap-1 px-3 pb-1',
       variant === 'roomy' ? 'mx-auto w-full max-w-3xl' : '',
     ]"
   >
+    <OText :id="headingId" variant="meta" as="h2" data-test="assistant-welcome-heading">
+      {{ t("assistant.welcome.suggestions") }}
+    </OText>
     <div v-if="loading" class="flex flex-col gap-2" data-test="assistant-welcome-loading">
       <OSkeleton v-for="row in 3" :key="row" type="text" class="h-5 w-3/5" />
     </div>
@@ -71,8 +74,9 @@ export function resetWelcomeTelemetryForTests(): void {
 </script>
 
 <script setup lang="ts">
-import { computed, watch } from "vue";
+import { computed, useId, watch } from "vue";
 
+import OText from "@/lib/core/Typography/OText.vue";
 import OSkeleton from "@/lib/feedback/Skeleton/OSkeleton.vue";
 import { trackAssistant } from "@/services/assistantAnalytics";
 import { useI18nTyped } from "@/types/i18n";
@@ -87,6 +91,7 @@ const props = withDefaults(defineProps<AssistantWelcomeProps>(), {
 const emit = defineEmits<AssistantWelcomeEmits>();
 
 const { t } = useI18nTyped();
+const headingId = `assistant-welcome-${useId()}`;
 
 const fresh = computed(() => props.scope.streamCount === 0);
 const shownStarters = computed(() => props.starters.slice(0, WELCOME_STARTERS));

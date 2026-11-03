@@ -99,15 +99,21 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
         :range-label="rangeLabelOf(turn)"
       >
         <template v-if="actionsFor(turn)" #actions>
-          <AssistantMessageActions
-            :sid="sid!"
-            :message="turn.user"
-            :turn-id="turn.turnId"
-            :is-last="turn.isLast"
-            :prompt-number="turn.userNumber"
-            :density="density"
-            @edit="editing = turn.turnId"
-          />
+          <div
+            :class="['flex shrink-0', running ? 'invisible' : '']"
+            :inert="running || undefined"
+            data-test="assistant-prompt-actions"
+          >
+            <AssistantMessageActions
+              :sid="sid!"
+              :message="turn.user"
+              :turn-id="turn.turnId"
+              :is-last="turn.isLast"
+              :prompt-number="turn.userNumber"
+              :density="density"
+              @edit="editing = turn.turnId"
+            />
+          </div>
         </template>
         <template v-if="editing === turn.turnId && sid" #body>
           <AssistantMessageActions
@@ -151,17 +157,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
               @select="(n) => selectVersion(turn.turnId, n, turn.version.count)"
             />
           </template>
-          <template v-if="statusShown(turn)" #status>
-            <div data-status-row>
-              <AssistantTurnStatus
-                variant="block"
-                :turn="session!.turn"
-                :meta="session!.turnMeta"
-                :owned-by-this-tab="session!.turnMeta.ownedByThisTab"
-                :answer="turn.answer"
-              />
-            </div>
-          </template>
           <template #after>
             <AssistantTurnOutcome
               v-for="outcome in outcomesOf(turn)"
@@ -201,6 +196,16 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
             <AssistantFollowUps :sid="sid!" :items="followUpsOf(turn)" />
           </template>
         </AssistantMessage>
+        <!-- The live line closes the turn, so an answered record never sits under it (A3) -->
+        <div v-if="statusShown(turn)" data-status-row>
+          <AssistantTurnStatus
+            variant="block"
+            :turn="session!.turn"
+            :meta="session!.turnMeta"
+            :owned-by-this-tab="session!.turnMeta.ownedByThisTab"
+            :answer="turn.answer"
+          />
+        </div>
       </article>
       <AssistantHandoffSuggestion
         v-if="suggestionOf(turn)"
@@ -501,25 +506,25 @@ function compactionOf(message: ChatMessage | null | undefined): string | null {
   return block?.message ? String(block.message) : null;
 }
 
-// While a card waits the card itself is the turn's status.
+// While a card waits the card itself is the turn's status; a followed turn speaks in the shell's elsewhere row.
 function statusShown(turn: TranscriptTurn): boolean {
-  return turn.live && !props.readonly && !!session.value && !session.value.pendingApproval;
+  const current = session.value;
+  return (
+    turn.live &&
+    !props.readonly &&
+    !!current &&
+    !current.pendingApproval &&
+    current.turnMeta.ownedByThisTab
+  );
 }
 
 function turnName(turn: TranscriptTurn): I18nText {
   return t("assistant.transcript.turnLabel", { n: turn.number, prompt: turn.firstLine });
 }
 
-// The bar hides while any turn runs, and never renders on a readonly page (EB-09 AC 3, AC 7).
+// The bar is inert while any turn runs, and never renders on a readonly page (EB-09 AC 3, AC 7).
 function actionsFor(turn: TranscriptTurn): boolean {
-  return (
-    !!props.sid &&
-    !!live &&
-    !props.readonly &&
-    !running.value &&
-    !!turn.user &&
-    editing.value !== turn.turnId
-  );
+  return !!props.sid && !!live && !props.readonly && !!turn.user && editing.value !== turn.turnId;
 }
 
 // An answer with no text has nothing to copy, and a failed one acts only through its outcome block (`30` §8.3).
@@ -712,7 +717,9 @@ function observeStatusRow(): void {
   observer = null;
   const el = root.value?.querySelector<HTMLElement>("[data-status-row]");
   if (!el) return emit("status-visible", false);
-  if (typeof IntersectionObserver === "undefined") return emit("status-visible", true);
+  // Following keeps a freshly mounted row in view, so the strip never doubles it before the first callback.
+  emit("status-visible", true);
+  if (typeof IntersectionObserver === "undefined") return;
   observer = new IntersectionObserver(
     (entries) =>
       emit(
@@ -724,7 +731,14 @@ function observeStatusRow(): void {
   observer.observe(el);
 }
 
-watch(liveTurnId, observeStatusRow, { flush: "post" });
+// A card hides the row and an answer brings it back, so the row's key names both (A1).
+const statusRowKey = computed(() =>
+  liveTurnId.value && !session.value?.pendingApproval && session.value?.turnMeta.ownedByThisTab
+    ? liveTurnId.value
+    : null,
+);
+
+watch(statusRowKey, observeStatusRow, { flush: "post" });
 
 // The latest article changes when a turn is added or its answer mounts, so the key names both.
 const latestAnswerKey = computed(() => {

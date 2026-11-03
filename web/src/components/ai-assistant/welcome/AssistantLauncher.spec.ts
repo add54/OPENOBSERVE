@@ -222,15 +222,15 @@ describe("AssistantLauncher", () => {
     expect(wrapper.find('[data-test="assistant-launcher-suggestions"]').exists()).toBe(false);
   });
 
-  it("folds to its header while the sidebar is open (D5 decision 10)", async () => {
+  it("hides while the sidebar is open, so Home never shows a second assistant", async () => {
     const { wrapper, store } = setup();
-    expect(wrapper.find('[data-test="assistant-launcher-suggestions"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="assistant-launcher"]').exists()).toBe(true);
     store.state.shell.placement = { kind: "sidebar" };
     await flushPromises();
-    expect(wrapper.find('[data-test="assistant-launcher-suggestions"]').exists()).toBe(false);
-    expect(wrapper.find('[data-test="assistant-launcher-your-chats"]').exists()).toBe(false);
-    expect(wrapper.find("input").exists()).toBe(false);
-    expect(wrapper.find('[data-test="assistant-launcher-open"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="assistant-launcher"]').exists()).toBe(false);
+    store.state.shell.placement = { kind: "hidden" };
+    await flushPromises();
+    expect(wrapper.find('[data-test="assistant-launcher-suggestions"]').exists()).toBe(true);
   });
 
   it("holds the time prefix and the i inside the input, and opens the full view in place", () => {

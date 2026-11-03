@@ -112,7 +112,7 @@ test.describe("assistant honest turns", () => {
     expect(all).toContain("Listing streams");
     expect(all).toContain("Reading schema for default");
     expect(all).toContain("Querying default");
-    await expect(assistant.status()).toContainText(/· \d+ s/, { timeout: 15_000 });
+    await expect(assistant.status().locator('[data-test="assistant-turn-status-elapsed"]')).toContainText(/\d+ s/, { timeout: 15_000 });
     for (const phrase of FILLER) await expect(page.getByText(phrase)).toHaveCount(0);
   });
 
@@ -120,7 +120,7 @@ test.describe("assistant honest turns", () => {
     test.setTimeout(90_000);
     await openOnLogs(page);
     await ask(page, "keepalive_stall");
-    await expect(assistant.status().locator('[data-test="assistant-turn-status-stall"]')).toContainText(
+    await expect(assistant.status().locator('[data-test="assistant-turn-status-text"]')).toContainText(
       /No response for 3\d s/,
       { timeout: 45_000 },
     );
@@ -164,7 +164,7 @@ test.describe("assistant honest turns", () => {
     await openOnLogs(page);
     await ask(page, "drop_mid_stream");
     await expect(assistant.outcome()).toHaveAttribute("data-code", "stream_dropped");
-    await expect(assistant.outcome()).toContainText(/Connection lost after \d+ s\. Nothing was changed\./);
+    await expect(assistant.outcome()).toContainText(/Connection lost( after \d+ s)?\. Nothing was changed\./);
     await expect(assistant.outcomeAction()).toHaveText("Retry");
     await expect(assistant.answer().locator('[data-test="assistant-block-text"]')).not.toHaveCount(0);
     await expect(page.locator('[data-test^="assistant-feedback"]')).toHaveCount(0);

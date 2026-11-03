@@ -59,13 +59,3 @@ export function controlsWidthOf(row: HTMLElement | null): number {
   const gap = parseFloat(getComputedStyle(row).columnGap) || 0;
   return parts.reduce((sum, part) => sum + part.offsetWidth, gap * (parts.length - 1));
 }
-
-/** The draft's width in the textbox's own font; 0 where the browser has no canvas. */
-export function textWidthOf(field: HTMLTextAreaElement | null, text: string): number {
-  if (!field || !text) return 0;
-  const context = document.createElement("canvas").getContext("2d");
-  if (!context) return 0;
-  const style = getComputedStyle(field);
-  context.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
-  return context.measureText(text).width;
-}

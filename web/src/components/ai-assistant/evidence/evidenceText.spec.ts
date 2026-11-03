@@ -43,6 +43,15 @@ describe("queryFragments", () => {
     ]);
   });
 
+  it("drops the row cap, which tells no two queries apart", () => {
+    expect(
+      queryFragments([
+        "SELECT count(*) FROM a WHERE level='error' ORDER BY x LIMIT 100",
+        "SELECT count(*) FROM b LIMIT 100 OFFSET 20",
+      ]),
+    ).toEqual(["level='error' ORDER BY x", "count(*)"]);
+  });
+
   it("leaves text it cannot read as SQL alone", () => {
     expect(queryFragments(["rate(http_requests_total[5m])"])).toEqual([
       "rate(http_requests_total[5m])",

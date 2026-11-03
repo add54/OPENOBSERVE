@@ -111,7 +111,18 @@ describe("AssistantQueriesGroup", () => {
     const { wrapper } = mountGroup([schema, query("a", "default")]);
     await wrapper.get('[data-test="assistant-queries-line"]').trigger("click");
     expect(wrapper.find('[data-test="assistant-queries-row-s1"]').exists()).toBe(true);
-    expect(wrapper.get('[data-test="assistant-queries-line"]').text()).toMatch(/^1 query, /);
+    expect(wrapper.get('[data-test="assistant-queries-line"]').text()).toMatch(/^2 steps, /);
+  });
+
+  it("folds every schema read into one row and counts the rows it opens to", async () => {
+    const second: ContentBlock = { ...schema, call_id: "s2", context: { stream_name: "other" } };
+    const { wrapper } = mountGroup([schema, second, query("a", "default")]);
+    await wrapper.get('[data-test="assistant-queries-line"]').trigger("click");
+    const rows = wrapper.findAll('[data-test^="assistant-queries-row-"]');
+    expect(rows).toHaveLength(2);
+    expect(rows[0].text()).toContain("Read schema for default, other");
+    expect(rows[0].find('[data-step-header="s2"]').exists()).toBe(true);
+    expect(wrapper.get('[data-test="assistant-queries-line"]').text()).toMatch(/^2 steps, /);
   });
 
   it("opens a citation's line when the answer asks for that step, and leaves the row closed", async () => {

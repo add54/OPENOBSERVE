@@ -69,7 +69,13 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
               <OIcon :name="assistantGlyph[view.badge]" size="xs" />
             </span>
           </span>
-          <OTooltip side="bottom" :content="view.tooltip" :shortcut-id="shortcutId" />
+          <!-- A visible container already says the state, and the bubble covered its bar; the name keeps it (D1) -->
+          <OTooltip
+            side="bottom"
+            :content="view.tooltip"
+            :shortcut-id="shortcutId"
+            :disabled="anyVisible"
+          />
         </OButton>
       </template>
       <AssistantGateState
@@ -218,6 +224,7 @@ import AssistantGateState, {
 } from "@/components/ai-assistant/gate/AssistantGateState.vue";
 import {
   openAssistant,
+  openWindowsOf,
   sessionView,
   useAssistantCapability,
   useAssistantHistory,
@@ -268,6 +275,7 @@ const toasted = new Set<string>();
 
 const org = computed<string>(() => vuex.state.selectedOrganization?.identifier ?? "");
 const visible = computed(() => placement.isVisible.value || !!lockedPanel.value);
+const anyVisible = computed(() => visible.value || store.anyContainerVisible());
 const shortcutId = computed(() =>
   capability.assistantCanChat.value ? "assistantOpen" : undefined,
 );
@@ -458,7 +466,29 @@ function onClick(): void {
     return;
   }
   if (current.otherOrg) return void runs.requestOpen(buttonEl());
+  if (toggleSidebar()) return;
   openOnLitSession(buttonEl());
+}
+
+// The container rule comes before the light: the button toggles the sidebar, and windows alone get a sidebar on a new chat (shell spec §5, E1–E2).
+function toggleSidebar(): boolean {
+  const { placement: shown } = store.state.shell;
+  if (shown.kind === "sidebar") {
+    trackAssistant("ai_container_closed", { reason: "close" });
+    store.close("close");
+    return true;
+  }
+  if (shown.kind !== "hidden" || !openWindowsOf(store.state.shell).length) return false;
+  void openAssistant({
+    entryKind: "header_button",
+    entryVerb: "ask",
+    objectKind: "none",
+    intent: "open",
+    thread: "new",
+    container: "sidebar",
+    invoker: buttonEl(),
+  });
+  return true;
 }
 
 // A lit session is the one the click is about, so the container opens on it (SH-07 AC 4–5).

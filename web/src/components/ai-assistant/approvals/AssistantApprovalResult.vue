@@ -17,6 +17,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 <template>
   <div
     v-if="view"
+    ref="rootEl"
     class="flex min-w-0 flex-col gap-1"
     :data-state="view.state"
     :data-approval-id="card?.id"
@@ -78,6 +79,13 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
         >
           {{ meta }}
         </OText>
+        <span v-if="undoEntry && sid" class="flex shrink-0 items-center gap-1.5 text-xs">
+          <AssistantUndoControl
+            :entry="undoEntry"
+            :sid="sid"
+            test-id="assistant-approval-result-undo"
+          />
+        </span>
       </div>
       <p
         v-if="replyText"
@@ -162,6 +170,7 @@ import { useRouter } from "vue-router";
 
 import { assistantGlyph } from "@/components/ai-assistant/common/glyphs";
 import { TOUCH_TARGET_CLASS } from "@/components/ai-assistant/common/touchTarget";
+import { isRunning } from "@/composables/assistant";
 import {
   approvalEditor,
   approvalEntity,
@@ -175,6 +184,7 @@ import {
   approvalUntil,
   approvalVerb,
   assistantEvidenceHostKey,
+  assistantTranscriptHostKey,
   type ApprovalBlockData,
   type ApprovalResultItem,
   type AssistantTurnView,
@@ -191,6 +201,7 @@ import type { ChatMessage, ContentBlock } from "@/ts/interfaces/chat";
 import { raw, useI18nTyped, type I18nText } from "@/types/i18n";
 import { formatOrgTime } from "@/utils/formatters";
 
+import AssistantUndoControl from "./AssistantUndoControl.vue";
 import { lowerFirst, readableReason, statusReason } from "./approvalText";
 import {
   assistantApprovalsHostKey,
@@ -254,12 +265,15 @@ const emit = defineEmits<{ (e: "stop"): void }>();
 const { t } = useI18nTyped();
 const router = useRouter();
 const lineEl = ref<HTMLElement | null>(null);
+const rootEl = ref<HTMLElement | null>(null);
 const host = props.readonly ? null : inject(assistantApprovalsHostKey, null);
 const evidence = props.readonly ? null : inject(assistantEvidenceHostKey, null);
+const transcript = props.readonly ? null : inject(assistantTranscriptHostKey, null);
 
 const sid = computed(() => props.sid ?? props.turn?.sid ?? null);
 const live = computed(() => !props.readonly && !!sid.value && !!host);
 const session = computed(() => (sid.value && evidence ? evidence.session(sid.value) : null));
+const turnRunning = computed(() => (session.value?.turn ? isRunning(session.value.turn) : false));
 const org = computed(() => session.value?.org ?? props.turn?.org ?? "");
 const resolved = computed(() => props.block?.resolved ?? null);
 const card = computed<ApprovalBlockData | null>(
@@ -371,6 +385,13 @@ const meta = computed<I18nText | null>(() => {
   if (!current || !at || !TIMED_STATES.has(current.state)) return null;
   const time = raw(formatOrgTime(at));
   return BY_YOU_STATES.has(current.state) ? t("assistant.approval.record.youAt", { time }) : time;
+});
+
+const undoEntry = computed(() => {
+  const id = card.value?.id;
+  if (!live.value || !id) return null;
+  const entries = (session.value?.ledger ?? []).filter((entry) => entry.approvalId === id);
+  return entries.length === 1 && entries[0].undoable ? entries[0] : null;
 });
 
 const replyText = computed(() =>
@@ -652,11 +673,20 @@ watch(
       const active = document.activeElement;
       const line = lineEl.value;
       if (active && active !== document.body && !line?.parentElement?.contains(active)) return;
-      line?.focus({ preventScroll: true });
+      // A turn that already ended (a Deny often does) has no later idle edge to hand focus back on.
+      if (!turnRunning.value && transcript) transcript.focusComposer();
+      else line?.focus({ preventScroll: true });
     });
   },
   { immediate: true },
 );
+
+// A record left focused when its turn ends would strand the reader above the next prompt.
+watch(turnRunning, (running, wasRunning) => {
+  if (running || !wasRunning) return;
+  const active = document.activeElement;
+  if (active && rootEl.value?.contains(active)) transcript?.focusComposer();
+});
 
 function goBack(): void {
   if (sid.value) host?.goBack?.(sid.value);

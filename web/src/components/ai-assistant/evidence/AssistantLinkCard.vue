@@ -18,126 +18,130 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
   <div
     role="group"
     :aria-label="groupName"
-    class="rounded-surface border-border-default bg-surface-base flex min-w-0 flex-wrap items-start gap-x-3 gap-y-2 border p-2"
+    class="flex min-w-0 flex-col gap-0.5"
     :data-kind="redacted ? 'redacted' : (link?.kind ?? 'unsupported')"
     :data-source="source"
     data-test="assistant-link-card"
   >
-    <OIcon
-      :name="assistantGlyph.link"
-      size="sm"
-      class="text-text-secondary mt-0.5 shrink-0"
-      aria-hidden="true"
-    />
-    <div class="flex min-w-0 flex-1 basis-48 flex-col gap-0.5">
-      <OText variant="body-strong" as="p" class="break-words" data-test="assistant-link-card-title">
-        {{ title }}
-      </OText>
-      <OText
-        v-if="link?.id"
-        variant="meta"
-        as="p"
-        class="break-all"
-        data-test="assistant-link-card-id"
-      >
-        {{ t("assistant.link.id", { id: raw(link.id) }) }}
-      </OText>
-      <OTruncatedText
-        v-if="details"
-        class="text-text-secondary text-xs"
-        data-test="assistant-link-card-details"
-      >
-        {{ details }}
-      </OTruncatedText>
-      <OText
-        v-if="source === 'markdown'"
-        variant="meta"
-        as="p"
-        data-test="assistant-link-card-caption"
-      >
-        {{ t("assistant.link.fromAnswer") }}
-      </OText>
-      <OText v-if="opened" variant="meta" as="p" data-test="assistant-link-card-outcome">
-        {{ opened }}
-      </OText>
-    </div>
-    <div class="flex shrink-0 flex-wrap items-center gap-2 max-md:w-full">
-      <template v-if="link && canOpen">
+    <div class="flex min-w-0 flex-wrap items-center gap-1">
+      <template v-if="link && canOpen && showOpen">
         <OButton
-          v-if="showOpen"
-          :variant="newTabFirst ? 'secondary' : 'primary'"
-          size="sm"
+          variant="ghost-primary"
+          size="xs"
           as="a"
           :href="href"
+          :icon-left="assistantGlyph.link"
           :icon-right="opensElsewhere ? assistantGlyph.newTab : undefined"
           :aria-label="openName"
-          :class="['max-md:flex-1', TOUCH_TARGET_CLASS]"
+          :class="['-ms-2 min-w-0', TOUCH_TARGET_CLASS]"
           data-test="assistant-link-card-open"
           @click="onOpen"
         >
-          {{ t("assistant.link.openAction") }}
+          <span class="min-w-0 truncate" data-test="assistant-link-card-title">{{ title }}</span>
           <OTooltip v-if="link.kind === 'explorer'" :content="t('assistant.evidence.openHint')" />
         </OButton>
         <OButton
           v-if="showNewTab"
-          :variant="newTabFirst ? 'primary' : 'secondary'"
-          size="sm"
+          variant="ghost"
+          size="icon-xs"
           as="a"
           :href="href"
           target="_blank"
           rel="noopener noreferrer"
-          :icon-right="assistantGlyph.newTab"
+          :icon-left="assistantGlyph.newTab"
           :aria-label="t('assistant.evidence.opensNewTab', { label: groupName })"
-          :class="['max-md:flex-1', TOUCH_TARGET_CLASS]"
+          :class="TOUCH_TARGET_CLASS"
           data-test="assistant-link-card-new-tab"
           @click="onNewTab"
         >
-          {{ t("assistant.link.newTab") }}
+          <OTooltip :content="t('assistant.link.newTab')" />
         </OButton>
-        <ODropdown v-if="phoneMenu" align="end" privacy="mask">
-          <template #trigger>
-            <AssistantIconButton
-              :label="t('assistant.link.more')"
-              :icon="assistantGlyph.more"
-              data-test="assistant-link-card-more"
-            />
-          </template>
-          <ODropdownItem
-            :icon-left="assistantGlyph.newTab"
-            class="min-h-11"
-            data-test="assistant-link-card-new-tab"
-            @select="openNewTab"
-          >
-            {{ t("assistant.link.newTab") }}
-          </ODropdownItem>
-        </ODropdown>
       </template>
-      <template v-else-if="!link && !redacted">
-        <OButton
-          variant="secondary"
+      <OButton
+        v-else-if="link && canOpen"
+        variant="ghost-primary"
+        size="xs"
+        as="a"
+        :href="href"
+        target="_blank"
+        rel="noopener noreferrer"
+        :icon-left="assistantGlyph.link"
+        :icon-right="assistantGlyph.newTab"
+        :aria-label="t('assistant.evidence.opensNewTab', { label: groupName })"
+        :class="['-ms-2 min-w-0', TOUCH_TARGET_CLASS]"
+        data-test="assistant-link-card-new-tab"
+      >
+        <span class="min-w-0 truncate" data-test="assistant-link-card-title">{{ title }}</span>
+      </OButton>
+      <template v-else>
+        <OIcon
+          :name="assistantGlyph.link"
           size="sm"
-          disabled
-          focusable-unavailable
-          :class="['max-md:flex-1', TOUCH_TARGET_CLASS]"
-          data-test="assistant-link-card-open"
+          class="text-text-secondary shrink-0"
+          aria-hidden="true"
+        />
+        <OText
+          variant="body-strong"
+          as="p"
+          class="min-w-0 break-words"
+          data-test="assistant-link-card-title"
         >
-          {{ t("assistant.link.openAction") }}
-          <template #unavailable-reason>{{ t("assistant.link.unsupported") }}</template>
-          <OTooltip :content="t('assistant.link.unsupported')" />
-        </OButton>
-        <OButton
-          v-if="copyText"
-          variant="ghost"
-          size="sm"
-          :icon-left="assistantGlyph.copy"
-          :class="TOUCH_TARGET_CLASS"
-          data-test="assistant-link-card-copy"
-          @click="copy"
-        >
-          {{ t("assistant.query.copy") }}
-        </OButton>
+          {{ title }}
+        </OText>
+        <template v-if="!link && !redacted">
+          <OButton
+            variant="ghost"
+            size="xs"
+            disabled
+            focusable-unavailable
+            :class="TOUCH_TARGET_CLASS"
+            data-test="assistant-link-card-open"
+          >
+            {{ t("assistant.link.openAction") }}
+            <template #unavailable-reason>{{ t("assistant.link.unsupported") }}</template>
+            <OTooltip :content="t('assistant.link.unsupported')" />
+          </OButton>
+          <OButton
+            v-if="copyText"
+            variant="ghost"
+            size="xs"
+            :icon-left="assistantGlyph.copy"
+            :class="TOUCH_TARGET_CLASS"
+            data-test="assistant-link-card-copy"
+            @click="copy"
+          >
+            {{ t("assistant.query.copy") }}
+          </OButton>
+        </template>
       </template>
     </div>
+    <OText
+      v-if="link?.id"
+      variant="meta"
+      as="p"
+      class="break-all"
+      data-test="assistant-link-card-id"
+    >
+      {{ t("assistant.link.id", { id: raw(link.id) }) }}
+    </OText>
+    <OTruncatedText
+      v-if="details"
+      class="text-text-secondary text-xs"
+      data-test="assistant-link-card-details"
+    >
+      {{ details }}
+    </OTruncatedText>
+    <OText
+      v-if="source === 'markdown'"
+      variant="meta"
+      as="p"
+      data-test="assistant-link-card-caption"
+    >
+      {{ t("assistant.link.fromAnswer") }}
+    </OText>
+    <OText v-if="opened" variant="meta" as="p" data-test="assistant-link-card-outcome">
+      {{ opened }}
+    </OText>
   </div>
 </template>
 
@@ -145,17 +149,13 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 import { computed, inject } from "vue";
 import { useRouter } from "vue-router";
 
-import AssistantIconButton from "@/components/ai-assistant/common/AssistantIconButton.vue";
 import { assistantGlyph } from "@/components/ai-assistant/common/glyphs";
 import { TOUCH_TARGET_CLASS } from "@/components/ai-assistant/common/touchTarget";
 import { assistantEvidenceHostKey, type LinkTarget, type Sid } from "@/composables/assistant/pure";
-import useBreakpoint from "@/composables/useBreakpoint";
 import OButton from "@/lib/core/Button/OButton.vue";
 import OIcon from "@/lib/core/Icon/OIcon.vue";
 import OText from "@/lib/core/Typography/OText.vue";
 import OTruncatedText from "@/lib/core/Typography/OTruncatedText.vue";
-import ODropdown from "@/lib/overlay/Dropdown/ODropdown.vue";
-import ODropdownItem from "@/lib/overlay/Dropdown/ODropdownItem.vue";
 import OTooltip from "@/lib/overlay/Tooltip/OTooltip.vue";
 import { raw, useI18nTyped, type I18nText } from "@/types/i18n";
 import { copyToClipboard } from "@/utils/clipboard";
@@ -186,12 +186,10 @@ const props = withDefaults(
 const { t } = useI18nTyped();
 const evidence = props.readonly ? null : inject(assistantEvidenceHostKey, null);
 const router = useRouter();
-const { mdUp } = useBreakpoint();
 
 const live = computed(() => !props.readonly && !!evidence && !!props.sid);
 // Docked or dirty, Open itself goes to a new tab, so a second new-tab button would repeat it.
 const opensElsewhere = computed(() => live.value && evidence?.prefersNewTab() === true);
-const newTabFirst = computed(() => !live.value);
 // A chat of another org would open its targets in this one, so it offers no Open at all.
 const otherOrg = computed(() => {
   const org = props.sid && evidence ? evidence.session(props.sid)?.org : null;
@@ -200,8 +198,7 @@ const otherOrg = computed(() => {
 });
 const canOpen = computed(() => props.openable && !otherOrg.value);
 const showOpen = computed(() => live.value);
-const showNewTab = computed(() => !live.value || (mdUp.value && !opensElsewhere.value));
-const phoneMenu = computed(() => live.value && !mdUp.value && !opensElsewhere.value);
+const showNewTab = computed(() => !opensElsewhere.value);
 
 const href = computed(() => {
   if (!props.link || !router) return undefined;
@@ -282,10 +279,6 @@ function onOpen(event: MouseEvent): void {
 function onNewTab(event: MouseEvent): void {
   if (!live.value) return;
   event.preventDefault();
-  void navigate(true);
-}
-
-function openNewTab(): void {
   void navigate(true);
 }
 

@@ -52,6 +52,12 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
       :collapse-label="t('assistant.shell.sheetPeek')"
       data-test="assistant-shell-sheet"
       keep-mounted
+      handle-toggle
+      :snap-labels="{
+        peek: t('assistant.shell.sheetSnap.peek'),
+        half: t('assistant.shell.sheetSnap.half'),
+        full: t('assistant.shell.sheetSnap.full'),
+      }"
       :close-on-escape="false"
       @update:snap="onSnap"
       @update:open="(open) => !open && close('close')"
@@ -370,6 +376,24 @@ watch(visible, (shown, was) => {
   if (!shown && was && closed) void onClose();
   void nextTick(writeInsetEnd);
 });
+
+// A finished answer on a phone is read from its start, not from the bottom the stream left it at.
+watch(
+  () => activeSession.value?.turn.state,
+  async (state, before) => {
+    const session = activeSession.value;
+    if (lgUp.value || !visible.value || !session || state !== "done") return;
+    if (!before || AT_REST.has(before)) return;
+    await nextTick();
+    const answers = document.querySelectorAll<HTMLElement>(
+      "[data-test='assistant-shell-sheet'] [data-answer]",
+    );
+    const last = answers[answers.length - 1];
+    if (!last) return;
+    store.setFollow(session.sid, false);
+    last.scrollIntoView?.({ block: "start" });
+  },
+);
 
 watch(capability.gate, (gate) => {
   if (!LOCKED_GATES.has(gate)) closeLockedPanel();

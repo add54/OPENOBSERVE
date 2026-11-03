@@ -97,7 +97,7 @@ describe("AssistantApprovalCard", () => {
   });
   afterEach(() => (document.body.innerHTML = ""));
 
-  it("is a named group: the effect, the timer, Deny · Reply · the primary, and nothing else at rest", async () => {
+  it("is a named group: the effect, the timer, Details, then Deny · Reply · the primary, and nothing else at rest", async () => {
     const wrapper = mountCard(cardOf(DELETE_ONE, { expiresAt: Date.now() + 222_000 }));
     await flushPromises();
     const group = wrapper.get('[data-test="assistant-approval-card"]');
@@ -108,10 +108,10 @@ describe("AssistantApprovalCard", () => {
     expect(timer.text()).toBe("3:42");
     expect(timer.attributes("aria-label")).toBe("Expires in 3:42");
     expect(buttons(wrapper)).toEqual([
+      undefined,
       "assistant-approval-deny",
       "assistant-approval-reply",
       "assistant-approval-approve",
-      undefined,
     ]);
     expect(wrapper.text()).not.toContain("Reply declines");
   });
@@ -354,7 +354,7 @@ describe("AssistantApprovalCard", () => {
     setRuntimeHandle(null);
   });
 
-  it("offers a scope in Details only when the server says it may be granted", async () => {
+  it("offers a scope above the buttons only when the server says it may be granted", async () => {
     const run = cardOf({
       type: "confirmation_required",
       tool: "RunThing",
@@ -363,9 +363,9 @@ describe("AssistantApprovalCard", () => {
     });
     const wrapper = mountCard(run);
     await flushPromises();
-    expect(wrapper.find('[data-test="assistant-approval-scope"]').exists()).toBe(false);
-    await openDetails(wrapper);
-    expect(wrapper.find('[data-test="assistant-approval-scope"]').exists()).toBe(true);
+    const scope = wrapper.get('[data-test="assistant-approval-scope"]').element;
+    const approve = wrapper.get('[data-test="assistant-approval-approve"]').element;
+    expect(scope.compareDocumentPosition(approve) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     const destructive = mountCard(cardOf(DELETE_ONE, { grantable: true }));
     await openDetails(destructive);
     expect(destructive.find('[data-test="assistant-approval-scope"]').exists()).toBe(false);
@@ -612,7 +612,7 @@ describe("AssistantApprovalCard", () => {
         { id: "q1", expiresAt: Date.now() + 580_000, ...over },
       );
 
-    it("asks its question with the choices, Other answer and More time, and no Deny", async () => {
+    it("asks its question with the choices, More time and Other answer last, and no Deny", async () => {
       const wrapper = mountCard(question(), { extendable: true });
       await flushPromises();
       expect(wrapper.get('[data-test="assistant-approval-card"]').attributes("aria-label")).toBe(
@@ -624,9 +624,25 @@ describe("AssistantApprovalCard", () => {
       expect(buttons(wrapper)).toEqual([
         "assistant-question-option-payments",
         "assistant-question-option-platform",
-        "assistant-question-other",
         "assistant-approval-extend",
+        "assistant-question-other",
       ]);
+    });
+
+    it("drops footnote markers from its heading and draws the choices outlined", async () => {
+      const wrapper = mountCard(question({ question: "Which folder[^2] should it go in?" }));
+      await flushPromises();
+      expect(wrapper.get('[data-test="assistant-approval-heading"]').text()).toBe(
+        "Which folder should it go in?",
+      );
+      expect(
+        wrapper
+          .get('[data-test="assistant-question-option-payments"]')
+          .attributes("data-o2-variant"),
+      ).toBe("outline");
+      expect(
+        wrapper.get('[data-test="assistant-question-other"]').attributes("data-o2-variant"),
+      ).toBe("ghost");
     });
 
     it("sends a choice at once, and Other answer goes to the composer", async () => {

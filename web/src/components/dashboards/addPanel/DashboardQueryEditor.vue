@@ -1117,11 +1117,14 @@ export default defineComponent({
           .flatMap((group: any) => group.schema ?? [])
           .map((field: any) => String(field?.name ?? ""))
           .filter(Boolean),
+      // The panel stores `new Date(microseconds)`, so getTime() is in microseconds.
       get timeRange() {
-        const { start_time, end_time } = dashboardPanelData.meta.dateTime ?? {};
-        const from = start_time?.getTime?.();
-        const to = end_time?.getTime?.();
-        return typeof from === "number" && typeof to === "number" ? { from, to } : undefined;
+        const { start_time, end_time, relativeTimePeriod } = dashboardPanelData.meta.dateTime ?? {};
+        const from = start_time?.getTime?.() / 1000;
+        const to = end_time?.getTime?.() / 1000;
+        if (!Number.isFinite(from) || !Number.isFinite(to)) return undefined;
+        const period = typeof relativeTimePeriod === "string" ? relativeTimePeriod : "";
+        return { from, to, ...(/^\d+[smhdwMy]$/.test(period) && { period }) };
       },
       focusPicker: (kind) => {
         const selector =

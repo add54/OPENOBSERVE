@@ -134,6 +134,25 @@ describe("AssistantMentionMenu: Agents group (MULTI-AGENT-02)", () => {
     }
   });
 
+  it("says a policy every agent shares once in the header, with each purpose under its name", async () => {
+    withAgents([
+      { id: "o2-ai", pickable: true, available: true },
+      { id: "sre", pickable: true, available: true },
+      { id: "generate-query", pickable: true, available: true },
+    ]);
+    const { wrapper } = await open();
+    const group = wrapper.get('[data-test="assistant-mention-group-agents"]');
+    const note = group.get('[data-test="assistant-mention-group-note"]');
+    expect(note.text()).toBe("Asks before changing anything");
+    expect(group.attributes("aria-describedby")).toBe(note.attributes("id"));
+    expect(group.find('[data-test="assistant-mention-group-count"]').exists()).toBe(false);
+    const clauses = group
+      .findAll('[data-test="assistant-mention-agent-clause"]')
+      .map((c) => c.text());
+    expect(clauses).toHaveLength(2);
+    expect(clauses.some((c) => c.includes("Asks before"))).toBe(false);
+  });
+
   it("renders no group for one agent, without a roster, or in the + menu", async () => {
     withAgents([ROSTER[0]]);
     const one = await open();

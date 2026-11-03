@@ -62,8 +62,8 @@ export function markSignedIn(): void {
 }
 
 /** Stop on a turn another tab's card holds: that tab declines the card before the cancel. */
-export function stopElsewhere(sid: string): Promise<void> {
-  return current.value?.lifecycle.stopElsewhere(sid) ?? Promise.resolve();
+export function stopElsewhere(sid: string): Promise<boolean> {
+  return current.value?.lifecycle.stopElsewhere(sid) ?? Promise.resolve(false);
 }
 
 /** Why nothing may start a turn in `sid` right now (Send, Continue, Retry, Ask again, Regenerate, Edit), or `null`. */

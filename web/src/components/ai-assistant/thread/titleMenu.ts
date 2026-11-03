@@ -27,6 +27,8 @@ export interface TitleMenuRow {
   title: I18nText | null;
   status: ChatStatus | null;
   expiresAt: number | null;
+  /** When the chat last changed; a row with no status word shows it, so two chats of one title differ. */
+  updatedAt: number | null;
   /** Another org's chat: the org is its second line, and it never opens in place. */
   org: string | null;
   /** A wire agent id; title-menu rows carry the agent in the accessible name only. */
@@ -60,6 +62,7 @@ export function titleMenuRows(input: TitleMenuInput): TitleMenuRow[] {
       title: run.title,
       status: run.group,
       expiresAt: run.expiresAt,
+      updatedAt: run.at,
       org: run.otherOrg ? run.org : null,
       agent: run.agent,
     });
@@ -84,6 +87,7 @@ function fromHistory(row: HistoryRow, status: ChatStatus | null): TitleMenuRow {
     title: row.title,
     status,
     expiresAt: null,
+    updatedAt: row.updatedAt || null,
     org: null,
     agent: row.agentType,
   };

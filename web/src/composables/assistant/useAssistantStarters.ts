@@ -23,6 +23,7 @@ import type { StarterKind } from "@/services/assistantAnalytics";
 import { streamNameListQuery } from "@/services/stream.queries";
 import { gt, raw, type I18nKey, type I18nText } from "@/types/i18n";
 import { formatOrgRange, uiIntlLocale } from "@/utils/formatters";
+import { isInternalStreamName } from "@/utils/internalStreams";
 
 import type { AssistantHostAdapter, ObjectKind, Sid, Tri } from "./assistantStore.types";
 import type { ContextChip, PageContext } from "./context/types";
@@ -47,9 +48,6 @@ const STREAM_TYPES = ["logs", "metrics", "traces"] as const;
 
 /** Home starters ask about this window, and stage it with them so the answer covers it. */
 const HOME_PERIOD = "1h";
-
-/** Internal streams (`_o2_*`) are never counted or named (BUG-015). */
-const INTERNAL_STREAM = /^_o2_/;
 
 /** Model input stays English whatever the UI locale (`95` decision 6). */
 const PROMPT_LOCALE = "en-US";
@@ -162,7 +160,8 @@ export function useAssistantStarters(input: AssistantStartersInput): {
     return Array.isArray(data)
       ? data
           .map((s: { name?: string }) => s?.name ?? "")
-          .filter((name) => !!name && !INTERNAL_STREAM.test(name))
+          // The shared internal-stream rule, so a user's own `_myapp` still counts and is named (BUG-015, X3).
+          .filter((name) => !!name && !isInternalStreamName(name))
       : null;
   };
   const streamCount = computed(() => {

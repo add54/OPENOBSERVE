@@ -190,7 +190,7 @@ export function useAssistantClient(opts: AssistantClientOptions = {}): Assistant
       return stream(request, sink, signal, turnId, "signed_out");
     },
     async stop(org, session) {
-      await services.cancelTurn(org, session.sid, session.turnId ?? "");
+      await services.cancelTurn(org, session.sid, session.turnId);
     },
     confirm: (org, sid, body, timeoutMs) => services.confirm(org, sid, body, timeoutMs),
     feedback: (org, sid, body) => services.feedback(org, sid, body),

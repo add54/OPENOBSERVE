@@ -20,7 +20,7 @@ import { nextTick } from "vue";
 import { raw } from "@/types/i18n";
 
 import OSheet from "./OSheet.vue";
-import type { OSheetProps } from "./OSheet.types";
+import type { OSheetProps, SheetSnap } from "./OSheet.types";
 
 const base: OSheetProps = {
   open: true,
@@ -195,6 +195,69 @@ describe("OSheet", () => {
     handle().dispatchEvent(new PointerEvent("pointerdown", { clientY: 770, bubbles: true }));
     handle().dispatchEvent(new PointerEvent("pointerup", { clientY: 772, bubbles: true }));
     expect(wrapper.emitted("update:snap")).toEqual([["half"]]);
+  });
+
+  it("makes the handle the one toggle when asked, named by what it does", async () => {
+    const wrapper = mountSheet({ handleToggle: true });
+    expect(document.body.querySelector('[data-test="sheet-expand"]')).toBeNull();
+    expect(document.body.querySelector('[data-test="sheet-peek"]')).toBeNull();
+    expect(handle().tagName).toBe("BUTTON");
+    expect(handle().getAttribute("aria-label")).toBe("Show more");
+    handle().click();
+    await wrapper.setProps({ snap: "full" });
+    expect(handle().getAttribute("aria-label")).toBe("Show less");
+    handle().click();
+    expect(wrapper.emitted("update:snap")).toEqual([["full"], ["half"]]);
+  });
+
+  it("moves one snap per arrow key on the handle and speaks the snap it is at", async () => {
+    const wrapper = mountSheet({
+      handleToggle: true,
+      snapLabels: { peek: "Collapsed", half: "Half height", full: "Full height" },
+    });
+    expect(handle().getAttribute("aria-label")).toBe("Show more, Half height");
+    expect(handle().getAttribute("aria-keyshortcuts")).toBe("ArrowUp ArrowDown");
+    // Vue drops an event stamped in the same millisecond its listener was attached.
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    handle().dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    handle().dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+    expect(wrapper.emitted("update:snap")).toEqual([["peek"], ["full"]]);
+    await wrapper.setProps({ snap: "full" });
+    expect(handle().getAttribute("aria-label")).toBe("Show less, Full height");
+  });
+
+  it("keeps keyboard focus on a shown control when the arrow keys collapse to peek and back", async () => {
+    const wrapper: VueWrapper = mountSheet(
+      {
+        handleToggle: true,
+        snapPoints: ["peek", "half"],
+        "onUpdate:snap": (snap: SheetSnap) => wrapper.setProps({ snap }),
+      } as Partial<OSheetProps>,
+      { peek: "<span>Peek title</span>", default: "<p>body</p>" },
+    );
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 2));
+    handle().focus();
+    await settle();
+    handle().dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    await flushPromises();
+    const peekRow = document.body.querySelector<HTMLElement>('[data-test="sheet-peek-row"]')!;
+    expect(sheet()!.getAttribute("data-snap")).toBe("peek");
+    expect(document.activeElement).toBe(peekRow);
+    await settle();
+    peekRow.click();
+    await flushPromises();
+    expect(sheet()!.getAttribute("data-snap")).toBe("half");
+    expect(document.activeElement).toBe(handle());
+  });
+
+  it("leaves focus outside the sheet alone when it collapses to peek", async () => {
+    const outside = document.createElement("button");
+    document.body.appendChild(outside);
+    outside.focus();
+    const wrapper = mountSheet({ handleToggle: true }, { peek: "<span>Peek title</span>" });
+    await wrapper.setProps({ snap: "peek" });
+    await flushPromises();
+    expect(document.activeElement).toBe(outside);
   });
 
   it("writes its covered height to the page inset and clears it on close", async () => {

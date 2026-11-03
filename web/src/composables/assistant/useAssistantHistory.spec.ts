@@ -131,6 +131,18 @@ describe("useAssistantHistory in local-only mode", () => {
     });
   });
 
+  it("loads the list again when identity and persistence settle in the tick after the first ask", async () => {
+    vi.spyOn(assistant, "listChats").mockResolvedValue({
+      chats: [{ session_id: record(1).sessionId!, title: "Listed", created_at: 1, updated_at: 1 }],
+    });
+    const fake = setup();
+    fake.store.setIdentity({ userOrgKey: "k2", org: "default" });
+    fake.capability.value = { ...fake.capability.value, persistence: true };
+    await flushPromises();
+    expect(fake.history.listState.value.status).toBe("ready");
+    expect(fake.history.rows.value.map((row) => String(row.title))).toEqual(["Listed"]);
+  });
+
   it("reads as loading, not empty, until the browser store answers", async () => {
     const fake = setup({}, [record(1)]);
     fake.history.ensureLoaded();
@@ -786,6 +798,8 @@ describe("useAssistantHistory reload of a chat waiting on an approval", () => {
       expiresAt: frame.expires_at * 1000,
     });
     expect(session.turnMeta.ownedByThisTab).toBe(false);
+    // The held card is the chat's state, so every list reads it as waiting on the user (B1).
+    expect(session.turn).toMatchObject({ state: "awaiting_approval", callId: "apr_1" });
     expect(cardBlock(fake)).toMatchObject({ id: "apr_1" });
     expect(cardBlock(fake)?.noDecision).toBeUndefined();
   });

@@ -60,13 +60,15 @@ beforeEach(() => resetWelcomeTelemetryForTests());
 afterEach(() => track.mockClear());
 
 describe("AssistantWelcome", () => {
-  it("is a section of plain suggestion rows, nothing else (§8)", () => {
+  it("is a section of plain suggestion rows under one meta heading, nothing else (§8)", () => {
     const wrapper = mountWelcome();
     const section = wrapper.get('[data-test="assistant-welcome"]');
     expect(section.element.tagName).toBe("SECTION");
-    expect(section.attributes("aria-label")).toBe("Suggestions");
+    const heading = wrapper.get('[data-test="assistant-welcome-heading"]');
+    expect(heading.text()).toBe("Suggestions");
+    expect(section.attributes("aria-labelledby")).toBe(heading.attributes("id"));
     expect(wrapper.findAll("li")).toHaveLength(3);
-    expect(wrapper.find("h2").exists()).toBe(false);
+    expect(wrapper.findAll("h2")).toHaveLength(1);
     expect(wrapper.find('[data-test="assistant-welcome-scope"]').exists()).toBe(false);
     expect(wrapper.get('[data-test="assistant-starter-0"]').classes()).toContain(
       "whitespace-normal!",

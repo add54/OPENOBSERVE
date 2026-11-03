@@ -48,6 +48,9 @@ const SQL_SHAPE =
 
 const AND_AT = /^\sAND\s$/i;
 
+// The row cap the agent adds to every query tells two rows apart by nothing.
+const LIMIT_TAIL = /\s*\bLIMIT\s+\d+(?:\s+OFFSET\s+\d+)?\s*$/i;
+
 /** One answer's claim numbers by `call_id`, so prose chips and findings chips agree. */
 export const claimNumbersKey: InjectionKey<ComputedRef<Map<string, number>>> =
   Symbol("claimNumbers");
@@ -238,7 +241,11 @@ function sqlParts(sql: string): { select: string; terms: string[]; tail: string 
     }
   }
   terms.push(where.slice(start).trim());
-  return { select: select.trim(), terms: terms.filter(Boolean), tail: tail.trim() };
+  return {
+    select: select.trim(),
+    terms: terms.filter(Boolean),
+    tail: tail.trim().replace(LIMIT_TAIL, ""),
+  };
 }
 
 // Facts are separate values of one row, never one sentence split across keys.

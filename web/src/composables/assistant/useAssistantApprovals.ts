@@ -683,7 +683,7 @@ function watchEndedTurns(
   deps: Pick<ApprovalsDeps, "state">,
   inFlight: (key: string) => boolean,
   keyOf: (sid: Sid, id: string) => string,
-  drop: (session: AssistantSession, state: ApprovalOutcome["state"]) => void,
+  drop: (session: AssistantSession, state: ApprovalOutcome["state"] | "unknown") => void,
 ): () => void {
   return watch(
     () =>
@@ -698,7 +698,18 @@ function watchEndedTurns(
         if (!pending || !isTerminal(turn) || turn.state === "done") continue;
         if (inFlight(keyOf(session.sid, pending.id))) continue;
         const expired = turn.state === "failed" && turn.error.code === "approval_expired";
-        drop(session, turn.state === "stopped" ? "stopped" : expired ? "expired" : "withdrawn");
+        // A lost stream (a reload, a network drop) says nothing of the card, which the server may still hold.
+        const lost = turn.state === "failed" && turn.error.code === "stream_dropped";
+        drop(
+          session,
+          turn.state === "stopped"
+            ? "stopped"
+            : expired
+              ? "expired"
+              : lost
+                ? "unknown"
+                : "withdrawn",
+        );
       }
     },
   );

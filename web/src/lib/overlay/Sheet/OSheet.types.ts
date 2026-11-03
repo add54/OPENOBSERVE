@@ -47,6 +47,10 @@ export interface OSheetProps {
   inline?: boolean;
   /** Spans only this element's columns (a drawer narrower than the window) instead of the whole width. */
   alignTo?: HTMLElement | null;
+  /** The grab handle is the one size toggle, named by the expand or collapse label; no labelled buttons. */
+  handleToggle?: boolean;
+  /** With `handleToggle`, the current snap's name, spoken with the handle's label ("Show more, Half height"). */
+  snapLabels?: Partial<Record<SheetSnap, I18nText>>;
 }
 
 export interface OSheetEmits {

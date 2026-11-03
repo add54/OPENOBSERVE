@@ -576,6 +576,21 @@ describe("Stop on another tab's card", () => {
     }
   });
 
+  it("reports a failed cancel so the Stop never fails silently", async () => {
+    vi.useFakeTimers();
+    try {
+      const { store, receive, lifecycle } = setup();
+      vi.spyOn(store, "cancelTurn").mockResolvedValue(false);
+      receive({ v: 1, type: "approval_pending", sid: "z", turnId: "t", callId: "c", at: 1 });
+      const stopping = lifecycle.stopElsewhere("z");
+      receive({ v: 1, type: "approval_resolved", sid: "z", approved: true, at: 2 });
+      await vi.advanceTimersByTimeAsync(0);
+      await expect(stopping).resolves.toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("cancels at once when the card is released instead of answered, so a Stop is never dropped", async () => {
     vi.useFakeTimers();
     try {

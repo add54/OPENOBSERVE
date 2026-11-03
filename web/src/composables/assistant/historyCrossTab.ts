@@ -116,23 +116,42 @@ export function createHistoryCrossTab(ctx: HistoryCtx, records: HistoryRecords) 
   // The tab that still streams the turn, or another tab that already holds the card again, keeps it; this one only follows.
   const holdRestored = async (sid: Sid, turnId: string, card: ApprovalBlockData) => {
     const locks = deps.locks;
-    if (!locks) return void restore(sid, turnId, card);
+    if (!locks) {
+      if (!restore(sid, turnId, card)) return;
+      await cardGone(sid, card.id);
+      return resume(sid);
+    }
     const snapshot = await locks.query().catch(() => null);
     if (snapshot?.held?.some((lock) => lock.name === `o2-assistant-turn:${sid}`)) return;
     await locks
       .request(`o2-assistant-card:${sid}`, { ifAvailable: true }, async (lock) => {
-        if (lock && restore(sid, turnId, card)) await cardGone(sid, card.id);
+        if (!lock || !restore(sid, turnId, card)) return;
+        await cardGone(sid, card.id);
+        resume(sid);
       })
       .catch(() => undefined);
   };
 
+  // A held card is the turn's state here, so the chat reads as waiting on the user, not as thinking (B1).
   const restore = (sid: Sid, turnId: string, card: ApprovalBlockData): boolean => {
     const session = ctx.session(sid);
     if (!session || session.turnMeta.ownedByThisTab || session.turnMeta.turnId !== turnId)
       return false;
     if (!deps.approvals?.()?.restore(sid, card)) return false;
     restored.set(sid, { turnId, card });
+    session.turn = {
+      state: "awaiting_approval",
+      callId: card.id,
+      ...(card.kind === "question" && { question: true }),
+    };
     return true;
+  };
+
+  // The answered card hands the followed turn back to the server's run until its poll sees the end.
+  const resume = (sid: Sid) => {
+    const session = ctx.session(sid);
+    if (session && !session.turnMeta.ownedByThisTab && session.turn.state === "awaiting_approval")
+      session.turn = { state: "responding.thinking" };
   };
 
   // Resolves once the card is no longer pending here, or the history is disposed.

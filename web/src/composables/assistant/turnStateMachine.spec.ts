@@ -580,7 +580,7 @@ describe("turnReducer: every transition", () => {
     expect(errorTitle(failed("agent_unavailable")).key).toBe(
       "assistant.error.agent_unavailable.titleAfterChange",
     );
-    expect(errorTitle(failed("stream_dropped")).key).toBe(
+    expect(errorTitle(failed("stream_dropped"), { elapsedMs: 5_000 }).key).toBe(
       "assistant.error.stream_dropped.titleAfterChange",
     );
     expect(errorTitle(failed("approval_expired")).key).toBe(
@@ -588,6 +588,24 @@ describe("turnReducer: every transition", () => {
     );
     expect(errorTitle({ ...failed("agent_unavailable"), action: "retry" }).key).toBe(
       "assistant.error.agent_unavailable.title",
+    );
+  });
+
+  it("names no time for a connection lost inside the first second (A5)", () => {
+    const dropped = (action: "retry" | "ask_again") => ({
+      code: "stream_dropped" as const,
+      phase: "post_admission" as const,
+      retryable: true,
+      action,
+    });
+    expect(errorTitle(dropped("retry"), { elapsedMs: 400 }).key).toBe(
+      "assistant.error.stream_dropped.titleNow",
+    );
+    expect(errorTitle(dropped("ask_again"), { elapsedMs: 0 }).key).toBe(
+      "assistant.error.stream_dropped.titleAfterChangeNow",
+    );
+    expect(errorTitle(dropped("retry"), { elapsedMs: 1_000 }).key).toBe(
+      "assistant.error.stream_dropped.title",
     );
   });
 
@@ -709,20 +727,24 @@ describe("turnStatusText", () => {
     );
   });
 
-  it("shows elapsed from startedAt only after 5 s, in seconds then minutes", () => {
-    expect(turnStatusText(S.thinking, meta(), t, 4_000)?.line).toBe("Thinking");
-    expect(turnStatusText(S.thinking, meta(), t, 6_200)?.line).toBe("Thinking · 6 s");
+  it("keeps the words to the state and the one total timer beside them, in seconds then minutes (A2)", () => {
+    expect(turnStatusText(S.thinking, meta(), t, 4_000)).toMatchObject({
+      line: "Thinking",
+      elapsed: "4 s",
+    });
+    expect(turnStatusText(S.thinking, meta(), t, 6_200)?.line).toBe("Thinking");
     const later = meta({ lastFrameAt: 70_000 });
-    expect(turnStatusText(S.writing, later, t, 75_000)?.line).toBe(
-      "Writing the answer · 1 min 15 s",
-    );
+    expect(turnStatusText(S.writing, later, t, 75_000)).toMatchObject({
+      line: "Writing the answer",
+      elapsed: "1 min 15 s",
+    });
   });
 
   it("flips O2AIChat.stream.spec.ts:1268: an active tool reads as its step label, in a neutral tone", () => {
     const status = turnStatusText(S.tool, meta({ lastFrameAt: 3_000 }), t, 4_000);
-    expect(status).toEqual({ line: "Querying default", tone: "neutral" });
+    expect(status).toEqual({ line: "Querying default", elapsed: "4 s", tone: "neutral" });
     expect(turnStatusText(S.tool, meta({ lastFrameAt: 8_000 }), t, 12_000)?.line).toBe(
-      "Querying default · 12 s",
+      "Querying default",
     );
   });
 
@@ -736,12 +758,12 @@ describe("turnStatusText", () => {
     });
   });
 
-  it("adds the stall line after 30 s without a frame, amber, state unchanged (HT-01 AC 3)", () => {
+  it("says only the stall after 30 s without a frame, amber, state unchanged (HT-01 AC 3, A2)", () => {
     const quiet = meta({ startedAt: 0, lastFrameAt: 0 });
     expect(turnStatusText(S.tool, quiet, t, STALL_MS - 1)?.tone).toBe("neutral");
     expect(turnStatusText(S.tool, quiet, t, STALL_MS)).toEqual({
-      line: "Querying default · 30 s",
-      second: "No response for 30 s",
+      line: "No response for 30 s",
+      elapsed: null,
       tone: "warning",
     });
   });
@@ -749,23 +771,24 @@ describe("turnStatusText", () => {
   it("never stalls a turn that waits on the user, and pauses elapsed meanwhile (HT-01 AC 4)", () => {
     const paused = meta({ startedAt: 0, lastFrameAt: 0, pausedAt: 8_000, pausedMs: 0 });
     expect(turnStatusText(S.approval, paused, t, 60_000)).toEqual({
-      line: "Waiting for your approval · paused at 8 s",
+      line: "Waiting for your approval",
+      elapsed: "8 s",
       tone: "neutral",
     });
     const resumed = meta({ startedAt: 0, lastFrameAt: 60_000, pausedAt: null, pausedMs: 52_000 });
-    expect(turnStatusText(S.thinking, resumed, t, 62_000)?.line).toBe("Thinking · 10 s");
+    expect(turnStatusText(S.thinking, resumed, t, 62_000)?.elapsed).toBe("10 s");
   });
 
   it("says a waiting question needs the user, never that it waits for an approval", () => {
     const paused = meta({ startedAt: 0, lastFrameAt: 0, pausedAt: 8_000, pausedMs: 0 });
     const question = { state: "awaiting_approval", callId: "q1", question: true } as TurnState;
-    expect(turnStatusText(question, paused, t, 60_000)?.line).toBe("Needs you · paused at 8 s");
+    expect(turnStatusText(question, paused, t, 60_000)?.line).toBe("Needs you");
   });
 
   it("reads Caught up for 2 s after the tail catches up", () => {
     const caught = meta({ caughtUpAt: 10_000, lastFrameAt: 10_000 });
     expect(turnStatusText(S.thinking, caught, t, 11_000)?.line).toBe("Caught up");
-    expect(turnStatusText(S.thinking, caught, t, 12_500)?.line).toBe("Thinking · 12 s");
+    expect(turnStatusText(S.thinking, caught, t, 12_500)?.line).toBe("Thinking");
   });
 
   it("flips O2AIChat.reducer.spec.ts tail flush: the final-chunk frame reaches the machine", () => {
@@ -855,7 +878,7 @@ describe("turnReducer: WP-23 lifecycle frames", () => {
       "Retrying the AI provider in 9 s · attempt 2",
     );
     expect(turnStatusText(S.thinking, m, t, 20_000)?.line).toBe(
-      "Retrying the AI provider · attempt 2 · 20 s",
+      "Retrying the AI provider · attempt 2",
     );
     const delta = run(S.thinking, { type: "message_delta", content: "x" } as TurnEvent);
     expect(delta.effects).toContainEqual({

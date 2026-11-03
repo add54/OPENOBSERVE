@@ -43,10 +43,6 @@
           "typed": false,
           "noDecision": true
         }
-      },
-      {
-        "type": "error",
-        "errorType": "stream_dropped"
       }
     ]
   }

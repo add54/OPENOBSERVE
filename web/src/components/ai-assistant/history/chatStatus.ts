@@ -57,9 +57,10 @@ export function chatStatusOf(
   row: Pick<HistoryRow, "pendingApproval" | "activeTurn">,
   turn?: string | { state: string; error?: { code: string } },
 ): ChatStatus | null {
-  if (row.pendingApproval) return "needs_you";
-  if (row.activeTurn) return "answering";
   const held = typeof turn === "string" ? { state: turn } : turn;
+  // A question card is not an approval to the server's list, so this tab's waiting turn says it (B2).
+  if (row.pendingApproval || held?.state === "awaiting_approval") return "needs_you";
+  if (row.activeTurn) return "answering";
   if (held?.state !== "failed") return null;
   return held.error?.code === "approval_expired" ? "expired" : "failed";
 }

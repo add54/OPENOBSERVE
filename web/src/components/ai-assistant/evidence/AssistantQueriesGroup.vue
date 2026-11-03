@@ -94,6 +94,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
               class="flex min-w-0 flex-1 items-center gap-2 text-xs"
               :data-step-header="row.step.callId"
             >
+              <span v-for="id in row.folded" :key="id" hidden :data-step-header="id" />
               <span class="text-text-link w-3 shrink-0 text-start font-medium">
                 {{ row.step.n }}
               </span>
@@ -179,6 +180,7 @@ import {
   assistantEvidenceHostKey,
   isTerminal,
   queryCount,
+  trailRowCount,
   stepsOf,
   turnAnnotationKey,
   turnLockKey,
@@ -232,18 +234,25 @@ const hidden = computed(() => props.turn?.hiddenByOwner === true);
 const steps = computed(() => stepsOf(props.message, props.turn?.org ?? ""));
 const queries = computed(() => queryCount(steps.value));
 
+// The line counts the rows it opens to; it says queries only when every row is one.
 const lineText = computed<I18nText>(() => {
-  const count = steps.value.length;
-  if (hidden.value) return t("assistant.steps.hiddenByOwner", { count }, count);
+  const count = trailRowCount(steps.value);
+  if (hidden.value)
+    return t("assistant.steps.hiddenByOwner", { count: steps.value.length }, steps.value.length);
+  const allQueries = queries.value === count;
   if (!queries.value) return t("assistant.steps.summary", { count }, count);
   const windows = windowsOf(steps.value);
   if (!windows.length)
-    return t("assistant.footer.queries", { count: queries.value }, queries.value);
+    return allQueries
+      ? t("assistant.footer.queries", { count }, count)
+      : t("assistant.steps.summary", { count }, count);
   const range = clockRangeText({
     from: Math.min(...windows.map((window) => window.from)),
     to: Math.max(...windows.map((window) => window.to)),
   });
-  return t("assistant.evidence.line", { count: queries.value, range }, queries.value);
+  return allQueries
+    ? t("assistant.evidence.line", { count, range }, count)
+    : t("assistant.evidence.stepsLine", { count, range }, count);
 });
 
 const chatStream = computed(() => {
@@ -259,23 +268,30 @@ const fragments = computed(() => {
   return new Map(sql.map((step, index) => [step.callId, parts[index]]));
 });
 
-const rows = computed(() =>
-  steps.value.map((step) => {
+// Schema reads are groundwork, so all of them read as one row in the place of the first.
+const rows = computed(() => {
+  const schemas = steps.value.filter((step) => step.kind === "schema" && step.state === "done");
+  return steps.value.flatMap((step) => {
+    if (schemas.length > 1 && schemas.includes(step))
+      return step === schemas[0] ? [schemaRow(schemas)] : [];
     const stream = step.query?.stream;
-    return {
-      step,
-      mono: !!step.query,
-      text: step.query
-        ? raw(fragments.value.get(step.callId) ?? step.query.text)
-        : stepLine(step, t),
-      table: stream && stream !== chatStream.value ? raw(stream) : null,
-      count:
-        step.query && step.rows !== null
-          ? t("assistant.steps.rows", { count: formatCount(step.rows) }, step.rows)
-          : null,
-    };
-  }),
-);
+    return [
+      {
+        step,
+        folded: [] as string[],
+        mono: !!step.query,
+        text: step.query
+          ? raw(fragments.value.get(step.callId) ?? step.query.text)
+          : stepLine(step, t),
+        table: stream && stream !== chatStream.value ? raw(stream) : null,
+        count:
+          step.query && step.rows !== null
+            ? t("assistant.steps.rows", { count: formatCount(step.rows) }, step.rows)
+            : null,
+      },
+    ];
+  });
+});
 
 const lock = useTurnLock(() => props.turn?.sid ?? null);
 const blocked = computed<I18nText | null>(() => {
@@ -306,6 +322,18 @@ const noAccessLine = computed<I18nText>(() => {
     ? t("assistant.evidence.noAccess", { n, stream: raw(stream) }, n)
     : t("assistant.evidence.noAccessPlain", { n }, n);
 });
+
+function schemaRow(schemas: StepFacts[]) {
+  const streams = schemas.map((step) => step.target ?? step.query?.stream ?? "").filter(Boolean);
+  return {
+    step: schemas[0],
+    folded: schemas.slice(1).map((step) => step.callId),
+    mono: false,
+    text: t("assistant.steps.step.schema", { stream: raw([...new Set(streams)].join(", ")) }),
+    table: null,
+    count: null,
+  };
+}
 
 function toggle(callId: string, value: boolean): void {
   expanded.value = value

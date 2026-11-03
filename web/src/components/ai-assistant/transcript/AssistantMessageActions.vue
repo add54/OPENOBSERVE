@@ -85,6 +85,15 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
       :data-test="copyAnswer.dataTest"
       @click="copyAnswer.run"
     />
+    <AssistantIconButton
+      v-if="regenerateItem"
+      :label="regenerateItem.label"
+      :icon="regenerateItem.icon"
+      :disabled="regenerateItem.disabled"
+      :disabled-reason="regenerateItem.disabled ? regenerateItem.reason : undefined"
+      :data-test="regenerateItem.dataTest"
+      @click="regenerateItem.run"
+    />
     <ODropdown align="end" privacy="mask">
       <template #trigger>
         <AssistantIconButton
@@ -145,40 +154,19 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
     v-else
     role="group"
     :aria-label="t('assistant.message.actionsName')"
-    :class="[
-      'flex shrink-0 items-center gap-1',
-      isLast
-        ? ''
-        : 'opacity-0 group-focus-within/message:opacity-100 group-hover/message:opacity-100 pointer-coarse:opacity-100',
-    ]"
+    class="flex shrink-0 items-center gap-1 opacity-0 group-focus-within/message:opacity-100 group-hover/message:opacity-100 pointer-coarse:opacity-100"
     data-test="assistant-msg-actions"
   >
-    <template v-for="item in items" :key="item.id">
-      <OButton
-        v-if="density === 'roomy'"
-        variant="ghost"
-        size="sm"
-        :icon-left="item.icon"
-        :disabled="item.disabled"
-        :focusable-unavailable="item.disabled"
-        class="pointer-coarse:min-h-11"
-        :data-test="item.dataTest"
-        @click="item.run"
-      >
-        {{ item.label }}
-        <template v-if="item.disabled" #unavailable-reason>{{ item.reason }}</template>
-        <OTooltip v-if="item.disabled" :content="item.reason" />
-      </OButton>
-      <AssistantIconButton
-        v-else
-        :label="item.label"
-        :icon="item.icon"
-        :disabled="item.disabled"
-        :disabled-reason="item.disabled ? item.reason : undefined"
-        :data-test="item.dataTest"
-        @click="item.run"
-      />
-    </template>
+    <AssistantIconButton
+      v-for="item in items"
+      :key="item.id"
+      :label="item.label"
+      :icon="item.icon"
+      :disabled="item.disabled"
+      :disabled-reason="item.disabled ? item.reason : undefined"
+      :data-test="item.dataTest"
+      @click="item.run"
+    />
   </div>
 </template>
 
@@ -432,24 +420,24 @@ const copyAnswer = computed(() =>
   copyItem("answer", t("assistant.message.copyAnswer"), "assistant-msg-copy-answer", answerText),
 );
 
-const moreItems = computed<ActionItem[]>(() => {
-  const more: ActionItem[] = [];
-  // Without B-12 a version replaces the latest answer only; an older turn would fork the chat.
-  if (props.isLast && props.prompt && props.canRegenerate)
-    more.push({
-      id: "regenerate",
-      label: t("assistant.message.regenerate"),
-      icon: assistantGlyph.regenerate,
-      dataTest: "assistant-msg-regenerate",
-      disabled: turnLocked.value,
-      reason: turnLockedReason.value,
-      run: startRegenerate,
-    });
-  more.push(
-    copyItem("markdown", t("assistant.message.copyMarkdown"), "assistant-msg-copy-md", answerMd),
-  );
-  return more;
-});
+// Regenerate sits in the row beside Copy (H5); without B-12 a version replaces the latest answer only, so older turns never offer it.
+const regenerateItem = computed<ActionItem | null>(() =>
+  props.isLast && props.prompt && props.canRegenerate
+    ? {
+        id: "regenerate",
+        label: t("assistant.message.regenerate"),
+        icon: assistantGlyph.regenerate,
+        dataTest: "assistant-msg-regenerate",
+        disabled: turnLocked.value,
+        reason: turnLockedReason.value,
+        run: startRegenerate,
+      }
+    : null,
+);
+
+const moreItems = computed<ActionItem[]>(() => [
+  copyItem("markdown", t("assistant.message.copyMarkdown"), "assistant-msg-copy-md", answerMd),
+]);
 
 function copyItem(
   id: string,

@@ -58,6 +58,11 @@ describe("titleMenuRows", () => {
     expect(rows[0].expiresAt).toBe(9);
   });
 
+  it("carries when each chat last changed, so a row with no status word shows its time (I7)", () => {
+    const [row] = titleMenuRows(input({ history: [historyRow({ sid: "recent", updatedAt: 42 })] }));
+    expect(row.updatedAt).toBe(42);
+  });
+
   it("never lists the chat in view, nor a finished run as live", () => {
     const rows = titleMenuRows(
       input({

@@ -18,7 +18,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { nextTick, ref } from "vue";
 
 import { withCachedCards } from "@/composables/assistant/historyRecords";
-import type { ApprovalOutcome, ApprovalResult } from "@/composables/assistant/pure";
+import {
+  assistantTranscriptHostKey,
+  type ApprovalOutcome,
+  type ApprovalResult,
+} from "@/composables/assistant/pure";
 import { approvalOf } from "@/composables/assistant/reducer";
 import type { ChatMessage, ContentBlock } from "@/ts/interfaces/chat";
 import { raw } from "@/types/i18n";
@@ -56,6 +60,7 @@ function mountRecord(
     live?: boolean;
     held?: { value: boolean };
     gated?: boolean;
+    focusComposer?: () => void;
   } = {},
 ) {
   const message: ChatMessage = {
@@ -87,8 +92,15 @@ function mountRecord(
     },
     global: {
       plugins: [fakeRouter(routes)],
-      provide: { ...evidence.provide, [assistantApprovalsHostKey as symbol]: host },
+      provide: {
+        ...evidence.provide,
+        [assistantApprovalsHostKey as symbol]: host,
+        ...(over.focusComposer && {
+          [assistantTranscriptHostKey as symbol]: { focusComposer: over.focusComposer },
+        }),
+      },
     },
+    ...(over.focusComposer && { attachTo: document.body }),
   });
   return { wrapper, host, evidence };
 }
@@ -513,6 +525,41 @@ describe("AssistantApprovalResult", () => {
     first.wrapper.unmount();
   });
 
+  it("hands focus to the composer when a decision lands on a turn that already ended", async () => {
+    const held = ref(true);
+    const focusComposer = vi.fn();
+    const { wrapper, evidence } = mountRecord(null, { held, focusComposer });
+    evidence.store.annotate(evidence.sid, "approval:c9", {
+      approvalOutcome: { state: "declined", at: Date.now() },
+    });
+    held.value = false;
+    await nextTick();
+    await nextTick();
+    expect(focusComposer).toHaveBeenCalledTimes(1);
+    wrapper.unmount();
+  });
+
+  it("lands on the record while the turn runs on, then on the composer when it ends", async () => {
+    const held = ref(true);
+    const focusComposer = vi.fn();
+    const { wrapper, evidence } = mountRecord(null, { held, focusComposer });
+    const session = evidence.store.state.sessions[evidence.sid]!;
+    session.turn = { state: "responding.writing" };
+    await nextTick();
+    evidence.store.annotate(evidence.sid, "approval:c9", {
+      approvalOutcome: { state: "approved", at: Date.now() },
+    });
+    held.value = false;
+    await nextTick();
+    await nextTick();
+    expect(document.activeElement?.hasAttribute("data-approval-line")).toBe(true);
+    expect(focusComposer).not.toHaveBeenCalled();
+    session.turn = { state: "idle" };
+    await nextTick();
+    expect(focusComposer).toHaveBeenCalledTimes(1);
+    wrapper.unmount();
+  });
+
   it("speaks a decision just made once, and history never", () => {
     const fresh = mountRecord({ outcome: { state: "declined", at: Date.now() } });
     expect(fresh.evidence.host.announce).toHaveBeenCalledWith(
@@ -521,5 +568,34 @@ describe("AssistantApprovalResult", () => {
     );
     const old = mountRecord({ outcome: { state: "declined", at: 1 } });
     expect(old.evidence.host.announce).not.toHaveBeenCalled();
+  });
+
+  it("offers Undo on the line of a single undoable change, and leaves a batch's to the actions list", async () => {
+    const entry = {
+      id: "led-1",
+      approvalId: "c9",
+      turnId: "t1",
+      tool: "o2_delete",
+      op: "delete" as const,
+      resource: { type: "alert", name: "checkout-latency-old" },
+      status: "done" as const,
+      undoable: true,
+      at: 1,
+    };
+    const single = mountRecord({ outcome: { state: "done", at: 1 } });
+    single.evidence.store.state.sessions[single.evidence.sid]!.ledger.push(entry);
+    await nextTick();
+    expect(single.wrapper.find('[data-test="assistant-approval-result-undo-led-1"]').exists()).toBe(
+      true,
+    );
+    const batch = mountRecord({ outcome: { state: "done", at: 1 } });
+    batch.evidence.store.state.sessions[batch.evidence.sid]!.ledger.push(entry, {
+      ...entry,
+      id: "led-2",
+    });
+    await nextTick();
+    expect(batch.wrapper.find('[data-test^="assistant-approval-result-undo"]').exists()).toBe(
+      false,
+    );
   });
 });

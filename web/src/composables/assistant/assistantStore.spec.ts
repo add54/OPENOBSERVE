@@ -1433,6 +1433,38 @@ describe("draft restore after a reload (WP-05)", () => {
     expect(store.state.sessions[sid].composer.text).toBe("draft");
   });
 
+  it("never reads history for a chat that sent nothing, and brings its draft back (R17)", async () => {
+    const sid = "0190f3a0-0000-7000-8000-000000000095";
+    sessionStorage.setItem("o2.assistant.selected:k1", sid);
+    sessionStorage.setItem(
+      `o2.assistant.draft:k1:${sid}`,
+      JSON.stringify({ text: "line 1\nline 2", unsent: true }),
+    );
+    const open = vi.fn(() => Promise.reject(new Error("must not read")));
+    const { store } = makeStore({
+      history: { ...inertAssistantDeps().history, canReload: computed(() => true), open },
+    });
+    await flushPromises();
+    expect(open).not.toHaveBeenCalled();
+    expect(store.state.shell.activeSid).toBe(sid);
+    expect(store.state.sessions[sid].composer.text).toBe("line 1\nline 2");
+    expect(store.state.sessions[sid].composer).not.toHaveProperty("unsent");
+  });
+
+  it("marks the draft of a chat that sent nothing, and not one with turns", () => {
+    const { store } = makeStore();
+    const fresh = newSession(store);
+    store.stage(fresh, { text: "draft", mode: "replace" });
+    const sent = newSession(store);
+    store.state.sessions[sent].messages.push({ role: "user", content: raw("hi") });
+    store.stage(sent, { text: "next", mode: "replace" });
+    store.drafts.flush();
+    const stored = (sid: string) =>
+      JSON.parse(sessionStorage.getItem(`o2.assistant.draft:k1:${sid}`) ?? "{}");
+    expect(stored(fresh)).toMatchObject({ text: "draft", unsent: true });
+    expect(stored(sent)).not.toHaveProperty("unsent");
+  });
+
   it("starts empty when the selected chat left no draft", async () => {
     sessionStorage.setItem("o2.assistant.selected:k1", "0190f3a0-0000-7000-8000-000000000098");
     const { store } = makeStore();

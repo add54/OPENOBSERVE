@@ -234,6 +234,45 @@ describe("AssistantTranscript", () => {
     vi.unstubAllGlobals();
   });
 
+  it("brings the row back below the answered record and reports it visible once a card is answered (A1, A3)", async () => {
+    const observed: Element[] = [];
+    vi.stubGlobal(
+      "IntersectionObserver",
+      class {
+        observe(el: Element) {
+          if (el.matches("[data-status-row]")) observed.push(el);
+        }
+        disconnect() {}
+      },
+    );
+    const session = liveSession([prompt("one", "t1"), reply("first")], {
+      state: "awaiting_approval",
+      callId: "q1",
+      question: true,
+    });
+    Object.assign(session, { pendingApproval: { id: "q1" } });
+    const { wrapper } = mountLive(session);
+    await flushPromises();
+    expect(wrapper.find("[data-status-row]").exists()).toBe(false);
+    Object.assign(session, { pendingApproval: null });
+    session.turn = { state: "responding.thinking" };
+    await flushPromises();
+    const row = wrapper.get("[data-status-row]").element;
+    expect(observed.at(-1)).toBe(row);
+    expect(wrapper.emitted("status-visible")?.at(-1)).toEqual([true]);
+    const answer = wrapper.get('[data-test="assistant-answer-t1"]').element;
+    expect(answer.lastElementChild).toBe(row);
+    vi.unstubAllGlobals();
+  });
+
+  it("leaves a followed turn's status to the shell's elsewhere row", async () => {
+    const session = liveSession([prompt("one", "t1")], { state: "responding.thinking" });
+    session.turnMeta.ownedByThisTab = false;
+    const { wrapper } = mountLive(session);
+    await flushPromises();
+    expect(wrapper.find("[data-status-row]").exists()).toBe(false);
+  });
+
   it("observes the latest answer and reports when it leaves the view, so Go to answer shows only then", async () => {
     const observed: Element[] = [];
     const callbacks: IntersectionObserverCallback[] = [];
@@ -366,14 +405,20 @@ describe("AssistantTranscript", () => {
     );
   });
 
-  it("shows the action bars only on a settled live chat, never while a turn runs", async () => {
+  it("shows the action bars only on a settled live chat; a running turn keeps the prompt bar's room, inert (H3)", async () => {
     const session = liveSession([prompt("q", "t1"), reply("a")]);
     const { wrapper } = mountLive(session);
     await flushPromises();
     expect(wrapper.findAll('[data-test="actions-stub-bar"]')).toHaveLength(2);
     session.turn = { state: "responding.writing" };
     await flushPromises();
-    expect(wrapper.findAll('[data-test="actions-stub-bar"]')).toHaveLength(0);
+    const held = wrapper.findAll('[data-test="assistant-prompt-actions"]');
+    expect(held).toHaveLength(1);
+    expect(held[0].classes()).toContain("invisible");
+    expect(held[0].attributes("inert")).toBeDefined();
+    expect(
+      wrapper.find('[data-test="assistant-answer-t1"] [data-test="actions-stub-bar"]').exists(),
+    ).toBe(false);
   });
 
   it("switches the shown attempt through the version picker (`30` §8.2)", async () => {

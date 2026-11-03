@@ -45,6 +45,13 @@ describe("AssistantClaimChip", () => {
     expect(row.classList.contains("ring-2")).toBe(true);
   });
 
+  it("reads a collapsed run as one range", () => {
+    const wrapper = mount(AssistantClaimChip, {
+      props: { n: 14, to: 24, callId: "c", available: true, label: raw("Citations 14 to 24") },
+    });
+    expect(wrapper.get('[data-test="assistant-claim-14"]').text()).toBe("14–24");
+  });
+
   it("mutes an unavailable citation: no button and no Tab stop", () => {
     const wrapper = mount(AssistantClaimChip, {
       props: { n: 2, callId: "gone", available: false, label: raw("Not available") },

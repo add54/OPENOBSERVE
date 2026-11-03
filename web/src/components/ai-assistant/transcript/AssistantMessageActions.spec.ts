@@ -190,7 +190,28 @@ describe("AssistantMessageActions", () => {
     expect(onPrompt.find('[data-test="assistant-msg-more"]').exists()).toBe(true);
   });
 
-  it("drops Regenerate from More while Re-run shows", () => {
+  it("puts Regenerate in the row between Copy and More, outside the menu (H5)", () => {
+    const bar = mountActions({ message: answer, prompt }).get(
+      '[data-test="assistant-msg-actions"]',
+    );
+    const order = [...bar.element.querySelectorAll("[data-test]")]
+      .map((el) => el.getAttribute("data-test"))
+      .filter((id) =>
+        ["assistant-msg-copy-answer", "assistant-msg-regenerate", "assistant-msg-more"].includes(
+          id ?? "",
+        ),
+      );
+    expect(order).toEqual([
+      "assistant-msg-copy-answer",
+      "assistant-msg-regenerate",
+      "assistant-msg-more",
+    ]);
+    expect(
+      bar.get('[data-test="assistant-msg-regenerate"]').element.closest('[role="menu"]'),
+    ).toBeNull();
+  });
+
+  it("drops Regenerate while Re-run shows", () => {
     const wrapper = mountActions({ message: answer, prompt, canRegenerate: false });
     expect(wrapper.find('[data-test="assistant-msg-regenerate"]').exists()).toBe(false);
     expect(wrapper.find('[data-test="assistant-msg-copy-md"]').exists()).toBe(true);

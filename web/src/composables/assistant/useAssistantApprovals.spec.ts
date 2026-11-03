@@ -652,6 +652,14 @@ describe("useAssistantApprovals", () => {
     expect(env.confirm).not.toHaveBeenCalled();
   });
 
+  it("records no outcome for a card whose stream was lost, so a reload can hold it again", async () => {
+    const { session, outcome } = setup(PERMISSION);
+    session.turn = { state: "failed", error: { code: "stream_dropped" } } as never;
+    await nextTick();
+    expect(session.pendingApproval).toBeNull();
+    expect(outcome()).toBeUndefined();
+  });
+
   it("moves the turn's own timer with More time", async () => {
     const { sid, approvals, engine } = setup(PERMISSION, true);
     await approvals.extend(sid);

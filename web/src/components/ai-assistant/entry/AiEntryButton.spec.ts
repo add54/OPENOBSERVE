@@ -244,6 +244,16 @@ describe("AiEntryButton appearances", () => {
     expect(door(wrapper).text()).toBe("Sends this row and asks the assistant to explain it");
   });
 
+  it("narrowIconOnly: keeps the label as the accessible name and hides it from view below md", () => {
+    const { wrapper } = setup({ label: raw("Generate query"), narrowIconOnly: true });
+    const label = door(wrapper)
+      .findAll("span")
+      .filter((span: any) => span.text() === "Generate query")
+      .at(-1);
+    expect(label?.classes()).toContain("max-md:sr-only");
+    expect(door(wrapper).classes()).toContain("max-md:min-w-11");
+  });
+
   it("toggle: outline with aria-pressed, never fainter when pressed", () => {
     const { wrapper } = setup({ appearance: "toggle", verb: "ask", pressed: true });
     expect(door(wrapper).attributes("aria-pressed")).toBe("true");

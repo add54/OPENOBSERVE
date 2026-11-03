@@ -25,7 +25,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
   >
     <template #header-left>
       <!-- Left: back + title + stream info -->
-      <div class="flex items-center gap-2.5">
+      <div class="flex min-w-0 items-center gap-2.5">
         <div
           data-test="add-alert-back-btn"
           class="flex size-5 flex-shrink-0 cursor-pointer items-center justify-center rounded-full border opacity-60 transition-opacity hover:opacity-100"
@@ -34,32 +34,33 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
         >
           <OIcon name="arrow-back-ios-new" size="xs" />
         </div>
-        <span class="text-dialog-header-text block truncate text-lg font-semibold">{{
+        <span class="text-dialog-header-text block min-w-0 truncate text-lg font-semibold">{{
           t("alerts.addConditions")
         }}</span>
 
         <!-- Separator -->
-        <div class="bg-separator h-4 w-px opacity-30" />
+        <div class="bg-separator h-4 w-px shrink-0 opacity-30" />
 
-        <!-- Stream Type + Stream Name -->
-        <div class="flex items-center gap-2">
+        <div class="flex min-w-0 items-center gap-2 whitespace-nowrap">
           <div
             v-if="streamType"
-            class="rounded-default border-info/28 bg-info/10 inline-flex flex-row items-center gap-1.25 border px-2.5 py-0.75"
+            class="rounded-default border-info/28 bg-info/10 inline-flex flex-row items-center gap-1.25 border px-2.5 py-0.75 max-md:hidden"
           >
             <span class="text-2xs text-text-label font-semibold">{{ t("alerts.streamType") }}</span>
             <span class="text-2xs text-text-label opacity-30">:</span>
             <span class="text-text-link text-xs font-bold">{{ streamType }}</span>
           </div>
-          <span v-if="streamType && streamName" class="opacity-20 select-none">|</span>
-          <div
-            class="rounded-default border-sql-accent/28 bg-sql-accent/10 inline-flex flex-row items-center gap-1.25 border px-2.5 py-0.75"
+          <span v-if="streamType && streamName" class="opacity-20 select-none max-md:hidden"
+            >|</span
           >
-            <span class="text-2xs text-text-label font-semibold">{{
+          <div
+            class="rounded-default border-sql-accent/28 bg-sql-accent/10 inline-flex min-w-0 flex-row items-center gap-1.25 border px-2.5 py-0.75"
+          >
+            <span class="text-2xs text-text-label font-semibold max-md:hidden">{{
               t("alerts.stream_name")
             }}</span>
-            <span class="text-2xs text-text-label opacity-30">:</span>
-            <span v-if="streamName" class="text-sql-accent text-xs font-bold">{{
+            <span class="text-2xs text-text-label opacity-30 max-md:hidden">:</span>
+            <span v-if="streamName" class="text-sql-accent min-w-0 truncate text-xs font-bold">{{
               streamName
             }}</span>
             <span v-else class="text-sql-accent text-xs font-bold italic opacity-40">{{

@@ -73,6 +73,9 @@ const answerOf = (...states: ContentBlock["stepState"][]): ChatMessage => ({
 const text = (wrapper: ReturnType<typeof mountStatus>) =>
   wrapper.find('[data-test="assistant-turn-status-text"]').text();
 
+const timer = (wrapper: ReturnType<typeof mountStatus>) =>
+  wrapper.find('[data-test="assistant-turn-status-elapsed"]');
+
 describe("AssistantTurnStatus", () => {
   afterEach(() => vi.useRealTimers());
 
@@ -110,25 +113,27 @@ describe("AssistantTurnStatus", () => {
       expect(mountStatus(turn).find('[data-test="assistant-turn-status"]').exists()).toBe(false);
   });
 
-  it("adds elapsed after 5 s and the stall line in the warning tone after 30 s (HT-01 AC 2-3)", () => {
+  it("keeps the words still and the total in its own tabular slot; a stall says only itself (A2, HT-01 AC 3)", () => {
     const tool: TurnState = {
       state: "running_tool",
       tool: "SearchSQL",
       target: "default",
       callId: "c1",
     };
-    expect(text(mountStatus(tool, { now: 4_000, meta: { lastFrameAt: 4_000 } }))).toBe(
-      "Querying default",
+    const early = mountStatus(tool, { now: 4_000, meta: { lastFrameAt: 4_000 } });
+    expect(text(early)).toBe("Querying default");
+    expect(timer(early).text()).toBe("4 s");
+    expect(timer(early).classes()).toEqual(
+      expect.arrayContaining(["tabular-nums", "whitespace-nowrap", "min-w-[11ch]"]),
     );
-    expect(text(mountStatus(tool, { now: 12_000, meta: { lastFrameAt: 12_000 } }))).toBe(
-      "Querying default · 12 s",
-    );
+    const later = mountStatus(tool, { now: 12_000, meta: { lastFrameAt: 12_000 } });
+    expect(text(later)).toBe("Querying default");
+    expect(timer(later).text()).toBe("12 s");
     const stalled = mountStatus(tool, { now: 31_000 });
-    expect(stalled.find('[data-test="assistant-turn-status-stall"]').text()).toBe(
-      "No response for 31 s",
-    );
+    expect(text(stalled)).toBe("No response for 31 s");
     expect(stalled.attributes("data-tone")).toBe("warning");
     expect(stalled.classes()).toContain("text-status-warning-text");
+    expect(timer(stalled).exists()).toBe(false);
   });
 
   it("names the running step's number, the steps beside it and the results it thinks about (D3-c)", () => {
@@ -146,21 +151,54 @@ describe("AssistantTurnStatus", () => {
       text(mountStatus(running, { meta: fresh, answer: answerOf("running", "running") })),
     ).toBe("Querying default and 1 more");
     const thinking: TurnState = { state: "responding.thinking" };
+    // The finished trail lists a failed step as a row, so it is a result too (A4).
     expect(text(mountStatus(thinking, { meta: fresh, answer: answerOf("done", "failed") }))).toBe(
       "Thinking about 2 results",
     );
     expect(text(mountStatus(thinking, { meta: fresh }))).toBe("Thinking");
   });
 
-  it("counts time in the current state and adds the turn total past 30 s (D3-b)", () => {
+  it("counts the rows the finished trail shows: schema reads fold into one, a running step waits (A4)", () => {
+    const schema = (callId: string, stream: string): ContentBlock => ({
+      type: "tool_call",
+      tool: "StreamSchema",
+      call_id: callId,
+      stepState: "done",
+      context: { stream_name: stream },
+    });
+    const answer: ChatMessage = {
+      role: "assistant",
+      content: raw(""),
+      contentBlocks: [
+        schema("s1", "default"),
+        schema("s2", "other"),
+        ...answerOf("done").contentBlocks!,
+      ],
+    };
     const thinking: TurnState = { state: "responding.thinking" };
-    const line = text(
-      mountStatus(thinking, {
-        now: 40_000,
-        meta: { startedAt: 0, stateEnteredAt: 32_000, lastFrameAt: 39_000 },
-      }),
+    expect(text(mountStatus(thinking, { meta: { lastFrameAt: 1_000 }, answer }))).toBe(
+      "Thinking about 2 results",
     );
-    expect(line).toBe("Thinking · 8 s · 40 s in all");
+    const withRunning = {
+      ...answer,
+      contentBlocks: [
+        ...answer.contentBlocks!,
+        ...answerOf("running").contentBlocks!.map((b) => ({ ...b, call_id: "c9" })),
+      ],
+    };
+    expect(text(mountStatus(thinking, { meta: { lastFrameAt: 1_000 }, answer: withRunning }))).toBe(
+      "Thinking about 2 results",
+    );
+  });
+
+  it("times the whole turn, never the current state, so the words never change on a tick (A2)", () => {
+    const thinking: TurnState = { state: "responding.thinking" };
+    const wrapper = mountStatus(thinking, {
+      now: 40_000,
+      meta: { startedAt: 0, stateEnteredAt: 32_000, lastFrameAt: 39_000 },
+    });
+    expect(text(wrapper)).toBe("Thinking");
+    expect(timer(wrapper).text()).toBe("40 s");
   });
 
   it("stalls from the last data frame, so only a turn sending nothing but keepalives warns (R5)", () => {
@@ -169,21 +207,19 @@ describe("AssistantTurnStatus", () => {
       now: 80_000,
       meta: { startedAt: 0, lastFrameAt: 0, lastByteAt: 75_000 },
     });
-    expect(alive.find('[data-test="assistant-turn-status-stall"]').exists()).toBe(false);
+    expect(alive.attributes("data-tone")).toBe("neutral");
     const silent = mountStatus(thinking, {
       now: 80_000,
       meta: { startedAt: 0, lastFrameAt: 0, lastByteAt: 40_000 },
     });
-    expect(silent.find('[data-test="assistant-turn-status-stall"]').text()).toBe(
-      "No response for 40 s",
-    );
+    expect(text(silent)).toBe("No response for 40 s");
   });
 
   it("pauses with no motion while the turn waits on the user (HT-01 AC 4)", () => {
     const wrapper = mountStatus({ state: "awaiting_approval", callId: "c1" }, { now: 60_000 });
     expect(wrapper.find('[data-test="assistant-turn-status-spinner"]').exists()).toBe(false);
     expect(wrapper.find('[data-test="assistant-turn-status-glyph"]').exists()).toBe(true);
-    expect(wrapper.find('[data-test="assistant-turn-status-stall"]').exists()).toBe(false);
+    expect(wrapper.attributes("data-tone")).toBe("neutral");
   });
 
   it("draws the still retry glyph while reconnecting, never the pulse", () => {
@@ -192,10 +228,10 @@ describe("AssistantTurnStatus", () => {
     expect(wrapper.find('[data-test="assistant-turn-status-glyph"]').exists()).toBe(true);
   });
 
-  it("says another tab answers when this tab does not own the turn", () => {
-    expect(text(mountStatus({ state: "responding.writing" }, { owned: false }))).toBe(
-      "Answering in another tab",
-    );
+  it("says another tab answers when this tab does not own the turn, with no timer of its own", () => {
+    const wrapper = mountStatus({ state: "responding.writing" }, { owned: false });
+    expect(text(wrapper)).toBe("Answering in another tab");
+    expect(timer(wrapper).exists()).toBe(false);
   });
 
   it("leaves Stop to the composer in the block variant; line and card render it (`30` §3.2)", async () => {
@@ -227,10 +263,11 @@ describe("AssistantTurnStatus", () => {
           now: () => now,
         },
       });
-      expect(text(wrapper)).toBe("Thinking · 6 s");
+      expect(timer(wrapper).text()).toBe("6 s");
       now = 7_000;
       await vi.advanceTimersByTimeAsync(1_000);
-      expect(text(wrapper)).toBe("Thinking · 7 s");
+      expect(text(wrapper)).toBe("Thinking");
+      expect(timer(wrapper).text()).toBe("7 s");
       await wrapper.setProps({ turn: { state: "done", saved: "server" } });
       expect(vi.getTimerCount()).toBe(0);
     });

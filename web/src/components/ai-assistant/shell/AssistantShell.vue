@@ -843,6 +843,7 @@ const decisionsEl = ref<HTMLElement | null>(null);
 const approvalCardEl = ref<InstanceType<typeof AssistantApprovalCard> | null>(null);
 const consentCardEl = ref<InstanceType<typeof AssistantConsentCard> | null>(null);
 const statusRowVisible = ref(true);
+const cardInView = ref(false);
 const latestAnswerVisible = ref(true);
 const online = ref(typeof navigator === "undefined" || navigator.onLine !== false);
 const signedIn = ref(false);
@@ -951,21 +952,24 @@ const historyUnavailable = computed(
 const elsewhere = computed(() => {
   const current = session.value;
   if (!current || !isRunning(current.turn) || current.turnMeta.ownedByThisTab) return null;
+  // A card this tab holds again after a reload is the one status while it waits (B1).
+  if (current.pendingApproval) return null;
   const view = history.elsewhere(current.sid);
   const mode = view?.mode ?? "hint";
   const line =
     mode === "stalled"
       ? t("assistant.shell.stillRunningRefresh")
-      : view?.evidence === false
-        ? t("assistant.runs.state.reconnecting")
-        : mode === "polling"
-          ? t("assistant.shell.answeringElsewherePolling")
-          : t("assistant.shell.answeringElsewhere");
+      : view?.ownedHere
+        ? t("assistant.shell.answeringHerePolling")
+        : view?.evidence === false
+          ? t("assistant.runs.state.reconnecting")
+          : mode === "polling"
+            ? t("assistant.shell.answeringElsewherePolling")
+            : t("assistant.shell.answeringElsewhere");
   return {
     line,
     stalled: mode === "stalled",
-    // A card this tab holds again after a reload is answerable right here.
-    approval: !!view?.approval && !approvalElsewhere.value && !current.pendingApproval,
+    approval: !!view?.approval && !approvalElsewhere.value,
   };
 });
 
@@ -1161,19 +1165,25 @@ const coolingDown = computed(() => cooldownUntil.value > clock.value);
 const strip = computed(() => {
   const current = session.value;
   if (!current || state.value !== "conversation") return null;
-  const status = isRunning(current.turn) && !statusRowVisible.value;
+  // A followed turn speaks through the elsewhere row alone, and a waiting card is its own status (C1).
+  const status =
+    isRunning(current.turn) &&
+    current.turnMeta.ownedByThisTab &&
+    !current.pendingApproval &&
+    !statusRowVisible.value;
   const jump = !current.ui.follow;
   // With no answer text there is nothing to go to; the outcome block is the latest content.
   const goToAnswer =
     !latestAnswerVisible.value &&
     ["done", "stopped", "failed"].includes(current.turn.state) &&
     hasAnswerText(current.messages);
-  // The keyboard bridge to a pending card; it stays while the card does, so the strip never shifts under a click.
+  // The bridge to a pending card is offered only while the card itself is out of view (C1).
   const review =
-    (!!approvalCard.value && !approvalSending.value) ||
-    (!!consentCard.value &&
-      consentCard.value.state !== "resolved_here" &&
-      consentCard.value.state !== "resolved_elsewhere");
+    !cardInView.value &&
+    ((!!approvalCard.value && !approvalSending.value) ||
+      (!!consentCard.value &&
+        consentCard.value.state !== "resolved_here" &&
+        consentCard.value.state !== "resolved_elsewhere"));
   return status || jump || goToAnswer || review
     ? { status, jump, goToAnswer: goToAnswer && !review, review }
     : null;
@@ -1238,11 +1248,10 @@ const reviewName = computed(() =>
 );
 const reviewLabel = computed(() => {
   const until = approvalCard.value?.expiresAt;
-  if (typeof until !== "number") return reviewName.value;
+  const label = t("assistant.strip.reviewLabel");
+  if (typeof until !== "number") return label;
   const time = raw(approvalClock(until - reviewClock.value));
-  return approvalCard.value?.kind === "question"
-    ? t("assistant.turn.withElapsed", { status: reviewName.value, elapsed: time })
-    : t("assistant.strip.reviewExpires", { time });
+  return t("assistant.turn.withElapsed", { status: label, elapsed: time });
 });
 
 // A full phone sheet covers the notice, so the waiting request becomes one row under the bar.
@@ -1298,7 +1307,10 @@ const approvalsHost: AssistantApprovalsHost = {
   currentUser: () => vuex.state.userInfo?.email ?? "",
   sendAgain: (sid, id) => void assistantApprovals()?.sendAgain(sid, id),
   askAgain: (sid, id) => void assistantApprovals()?.askAgain(sid, id),
-  stop: (sid) => void stopHeldTurn(sid),
+  stop: (sid) =>
+    void stopHeldTurn(sid).then((stopped) => {
+      if (!stopped) void toast({ variant: "error", message: t("assistant.outcome.stopItFailed") });
+    }),
   undo: (sid, ledgerId) =>
     assistantApprovals()?.undo(sid, ledgerId) ?? Promise.resolve({ ok: false, reason: "failed" }),
   gated: () => capability.value.approvalExtendBudgets !== true,
@@ -1613,18 +1625,42 @@ onBeforeUnmount(() => {
   if (stepTimer) clearTimeout(stepTimer);
   if (cooldownTimer) clearInterval(cooldownTimer);
   if (reviewTimer) clearInterval(reviewTimer);
+  cardObserver?.disconnect();
 });
 
-// The strip's countdown runs only while a card with a known expiry is shown.
+// The strip's countdown runs only while a card with a known expiry is shown, restarted with the card so both tick together (C1).
 watch(
   () =>
-    typeof approvalCard.value?.expiresAt === "number" ||
-    typeof sheetRequest.value?.expiresAt === "number",
-  (counting) => {
+    [
+      typeof approvalCard.value?.expiresAt === "number" ||
+        typeof sheetRequest.value?.expiresAt === "number",
+      approvalCardEl.value,
+    ] as const,
+  ([counting]) => {
     if (reviewTimer) clearInterval(reviewTimer);
+    reviewClock.value = Date.now();
     reviewTimer = counting ? setInterval(() => (reviewClock.value = Date.now()), 1_000) : null;
   },
   { immediate: true },
+);
+
+let cardObserver: IntersectionObserver | null = null;
+
+watch(
+  () => (approvalCardEl.value?.$el ?? consentCardEl.value?.$el ?? null) as Node | null,
+  (node) => {
+    const el = node instanceof Element ? node : null;
+    cardObserver?.disconnect();
+    cardObserver = null;
+    cardInView.value = !!el;
+    if (!el || typeof IntersectionObserver === "undefined") return;
+    cardObserver = new IntersectionObserver(
+      (entries) => (cardInView.value = entries.some((entry) => entry.isIntersecting)),
+      { root: transcript.value?.root ?? null },
+    );
+    cardObserver.observe(el);
+  },
+  { flush: "post" },
 );
 
 // A resolved card unmounts under the pressed button; focus goes to its record's action, else the composer.

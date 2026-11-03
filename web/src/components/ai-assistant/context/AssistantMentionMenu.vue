@@ -21,7 +21,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
       inline
         ? 'max-h-72 overflow-y-auto'
         : [
-            'bg-dropdown-bg border-dropdown-border rounded-surface max-h-60 overflow-y-auto border p-1 shadow-md',
+            'bg-dropdown-bg border-dropdown-border rounded-surface max-h-80 overflow-y-auto border p-1 shadow-md',
             'md:absolute md:inset-x-0 md:bottom-full md:mb-1 md:max-w-96',
           ]
     "
@@ -40,6 +40,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
         :key="group.id"
         role="group"
         :aria-label="group.title"
+        :aria-describedby="group.note ? `${listboxId}-${group.id}-note` : undefined"
         :aria-busy="group.state === 'loading' || undefined"
         :data-test="`assistant-mention-group-${group.id}`"
       >
@@ -48,9 +49,19 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
           aria-hidden="true"
         >
           <span>{{ group.title }}</span>
-          <span v-if="group.total" class="tabular-nums" data-test="assistant-mention-group-count">{{
-            group.total
-          }}</span>
+          <span
+            v-if="group.note"
+            :id="`${listboxId}-${group.id}-note`"
+            class="font-normal"
+            data-test="assistant-mention-group-note"
+            >{{ group.note }}</span
+          >
+          <span
+            v-else-if="group.total"
+            class="tabular-nums"
+            data-test="assistant-mention-group-count"
+            >{{ group.total }}</span
+          >
         </div>
         <div v-if="group.state === 'loading'" class="px-2 py-1" aria-hidden="true">
           <OSkeleton type="text" class="h-5 w-2/3" />
@@ -99,13 +110,27 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
             size="xs"
             class="text-text-secondary shrink-0"
           />
-          <OTruncatedText :class="['min-w-0 flex-1', item.code ? 'font-mono' : '']">{{
+          <span v-if="item.agent" class="flex min-w-0 flex-1 flex-col items-start text-start">
+            <span>{{ item.label }}</span>
+            <span
+              v-if="item.secondary"
+              :class="['text-xs', item.id === activeOptionId ? '' : 'text-text-secondary']"
+              data-test="assistant-mention-agent-clause"
+              >{{ item.secondary }}</span
+            >
+          </span>
+          <span v-else-if="item.action" class="shrink-0">{{ item.label }}</span>
+          <OTruncatedText v-else :class="['min-w-0 flex-1', item.code ? 'font-mono' : '']">{{
             item.label
           }}</OTruncatedText>
-          <span
-            v-if="item.secondary && (item.agent || query)"
-            :class="['shrink-0 text-xs', item.id === activeOptionId ? '' : 'text-text-secondary']"
-            >{{ item.secondary }}</span
+          <OTruncatedText
+            v-if="item.secondary && !item.agent && query"
+            :class="[
+              'text-xs',
+              item.action ? 'min-w-0 flex-1 text-end' : 'shrink-0',
+              item.id === activeOptionId ? '' : 'text-text-secondary',
+            ]"
+            >{{ item.secondary }}</OTruncatedText
           >
         </div>
       </div>
@@ -172,7 +197,7 @@ import { useQuery } from "@tanstack/vue-query";
 import { computed, reactive, ref, watch } from "vue";
 
 import { agentGlyph, assistantGlyph, chipGlyph } from "@/components/ai-assistant/common/glyphs";
-import { agentClause } from "@/components/ai-assistant/agents/agentClause";
+import { agentRowClause, sharedAgentPolicy } from "@/components/ai-assistant/agents/agentClause";
 import { announceComposer } from "@/components/ai-assistant/composer/composerUi";
 import { shortLabelFor, useAssistantCapability, useAssistantStore } from "@/composables/assistant";
 import {
@@ -203,6 +228,8 @@ interface Group {
   retry?: () => void;
   /** How many the group holds; the header's right-hand count. */
   total?: number;
+  /** What every row shares, said once in the header in place of the count. */
+  note?: I18nText;
 }
 
 const props = withDefaults(defineProps<AssistantMentionMenuProps>(), {
@@ -312,6 +339,7 @@ const pipelineOptions = computed<MentionOption[]>(() =>
 const agentGroup = computed<Group[]>(() => {
   const roster = capability.value.agents;
   if (props.inline || !rosterOffersChoice(roster)) return [];
+  const shared = sharedAgentPolicy(roster, t);
   const items = (roster ?? []).flatMap((agent): MentionOption[] => {
     const label = agentName(agent.id, t);
     if (!agentMatches(agent.id, String(label), props.query)) return [];
@@ -324,13 +352,23 @@ const agentGroup = computed<Group[]>(() => {
         action: "agent",
         agent: agent.id,
         glyph: reason ? assistantGlyph.locked : agentGlyph[agent.id],
-        secondary: reason ?? agentClause(agent, t),
+        secondary: reason ?? agentRowClause(agent, !!shared, t) ?? undefined,
         ...(reason && { disabled: true }),
       },
     ];
   });
   const title = t("assistant.composer.mention.group.agents");
-  return [{ id: "agents", title, kind: title, state: "ready", items, total: items.length }];
+  return [
+    {
+      id: "agents",
+      title,
+      kind: title,
+      state: "ready",
+      items,
+      total: items.length,
+      ...(shared && { note: shared }),
+    },
+  ];
 });
 
 const groups = computed<Group[]>(() =>

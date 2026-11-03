@@ -15,40 +15,38 @@
 
 import { describe, expect, it } from "vitest";
 
-import { composerFitsOneRow, composerPopoverClass, type ComposerRowInput } from "./composerUi";
+import {
+  ONE_ROW_TEXT_PX,
+  composerFitsOneRow,
+  composerPopoverClass,
+  type ComposerRowInput,
+} from "./composerUi";
 
 const ROW: ComposerRowInput = {
   narrow: false,
   extras: false,
-  text: "",
-  textWidth: 0,
-  frameWidth: 406,
+  frameWidth: 600,
   controlsWidth: 216,
 };
 
 describe("composerFitsOneRow", () => {
-  it("holds one row while the draft fits beside the controls", () => {
+  it("holds one row while the frame leaves the text its room beside the controls", () => {
     expect(composerFitsOneRow(ROW)).toBe(true);
-    expect(composerFitsOneRow({ ...ROW, text: "Find the cause", textWidth: 96 })).toBe(true);
+    expect(composerFitsOneRow({ ...ROW, frameWidth: 216 + 28 + ONE_ROW_TEXT_PX })).toBe(true);
   });
 
-  it("moves the text above the controls once it no longer fits", () => {
-    expect(composerFitsOneRow({ ...ROW, text: "long", textWidth: 180 })).toBe(false);
+  it("moves the text above the controls in a frame too narrow for that room (F2)", () => {
+    expect(composerFitsOneRow({ ...ROW, frameWidth: 216 + 28 + ONE_ROW_TEXT_PX - 1 })).toBe(false);
+    expect(composerFitsOneRow({ ...ROW, frameWidth: 406 })).toBe(false);
   });
 
-  it("gives an empty draft's placeholder the same test, so it never wraps", () => {
-    expect(composerFitsOneRow({ ...ROW, textWidth: 162 })).toBe(true);
-    expect(composerFitsOneRow({ ...ROW, textWidth: 162.5 })).toBe(false);
-  });
-
-  it("always takes two rows when narrow, with extras, or on a second line", () => {
+  it("always takes two rows when narrow or with extras", () => {
     expect(composerFitsOneRow({ ...ROW, narrow: true })).toBe(false);
     expect(composerFitsOneRow({ ...ROW, extras: true })).toBe(false);
-    expect(composerFitsOneRow({ ...ROW, text: "a\nb" })).toBe(false);
   });
 
   it("stays on one row until the frame has been measured", () => {
-    expect(composerFitsOneRow({ ...ROW, text: "x".repeat(200), frameWidth: 0 })).toBe(true);
+    expect(composerFitsOneRow({ ...ROW, frameWidth: 0 })).toBe(true);
   });
 });
 

@@ -38,6 +38,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
         </AssistantIconButton>
       </template>
       <ODropdownGroup :label="t('assistant.agent.picker.heading')">
+        <template v-if="sharedPolicy" #label-action>
+          <span class="text-xs font-normal" data-test="assistant-agent-shared-policy">{{
+            sharedPolicy
+          }}</span>
+        </template>
         <template v-for="row in rows" :key="row.id">
           <ODropdownItem
             role="option"
@@ -56,15 +61,20 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
                 class="text-text-secondary"
               />
             </template>
-            <span class="flex min-w-0 items-center gap-2">
+            <span class="flex min-w-0 flex-col items-start text-start">
               <span
-                :class="['shrink-0 text-sm', row.reason ? 'text-text-secondary' : '']"
+                :class="['text-sm', row.reason ? 'text-text-secondary' : '']"
                 data-test="assistant-agent-option-name"
                 >{{ row.name }}</span
               >
-              <span class="text-text-secondary ms-auto min-w-0 text-end text-xs">{{
-                row.askAdmin ? t("assistant.agent.unavailable.short") : (row.reason ?? row.clause)
-              }}</span>
+              <span
+                v-if="row.askAdmin || row.reason || row.clause"
+                class="text-text-secondary min-w-0 text-xs"
+                data-test="assistant-agent-option-clause"
+                >{{
+                  row.askAdmin ? t("assistant.agent.unavailable.short") : (row.reason ?? row.clause)
+                }}</span
+              >
             </span>
           </ODropdownItem>
           <div v-if="row.askAdmin" class="flex justify-end px-3 pb-1">
@@ -116,12 +126,12 @@ import ODropdownGroup from "@/lib/overlay/Dropdown/ODropdownGroup.vue";
 import ODropdownItem from "@/lib/overlay/Dropdown/ODropdownItem.vue";
 import { useI18nTyped, type I18nText } from "@/types/i18n";
 
-import { agentClause } from "./agentClause";
+import { agentClause, agentRowClause, sharedAgentPolicy } from "./agentClause";
 
 interface Row {
   id: AgentId;
   name: I18nText;
-  clause: I18nText;
+  clause: I18nText | null;
   reason: I18nText | null;
   askAdmin: boolean;
 }
@@ -159,13 +169,14 @@ const tooltip = computed(() =>
   t("assistant.agent.picker.tooltip", { agent: shownName.value, clause: shownClause.value }),
 );
 
+const sharedPolicy = computed(() => sharedAgentPolicy(roster.value, t));
 const rows = computed<Row[]>(() =>
   (roster.value ?? []).map((agent) => {
     const refusal = store.agentRefusal(agent.id);
     return {
       id: agent.id,
       name: agentName(agent.id, t),
-      clause: agentClause(agent, t),
+      clause: agentRowClause(agent, !!sharedPolicy.value, t),
       reason: agentReason(agent, refusal, t),
       askAdmin: refusal ? refusal === "agent_not_permitted" : isRoleLocked(agent),
     };

@@ -93,106 +93,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
         {{ gateLine }}
       </OText>
 
-      <!-- The buttons stay while the decision is on its way, so focus stays where it was -->
-      <div class="-ms-2.5 flex min-w-0 flex-wrap items-center gap-1">
-        <template v-if="question && !replying">
-          <OButton
-            v-for="option in card.options ?? []"
-            :key="option.id"
-            variant="ghost"
-            size="xs"
-            :disabled="sending"
-            focusable-unavailable
-            :class="TOUCH_TARGET_CLASS"
-            :data-test="`assistant-question-option-${option.id}`"
-            @click="(event: MouseEvent) => act(event, () => choose(option))"
-          >
-            {{ raw(option.label) }}
-          </OButton>
-          <OButton
-            v-if="card.allowOther || !card.options?.length"
-            variant="ghost"
-            size="xs"
-            :disabled="sending"
-            focusable-unavailable
-            :class="TOUCH_TARGET_CLASS"
-            data-test="assistant-question-other"
-            @click="(event: MouseEvent) => act(event, () => emit('reply'))"
-          >
-            {{ t("assistant.question.otherAnswer") }}
-          </OButton>
-        </template>
-        <template v-else-if="!replying">
-          <OButton
-            ref="denyButton"
-            variant="ghost"
-            size="xs"
-            :disabled="sending"
-            focusable-unavailable
-            :class="TOUCH_TARGET_CLASS"
-            data-test="assistant-approval-deny"
-            @click="
-              (event: MouseEvent) => act(event, () => decide({ approved: false, reason: 'deny' }))
-            "
-          >
-            {{ t("assistant.approval.deny") }}
-          </OButton>
-          <OButton
-            variant="ghost"
-            size="xs"
-            :disabled="sending"
-            focusable-unavailable
-            :class="TOUCH_TARGET_CLASS"
-            data-test="assistant-approval-reply"
-            @click="(event: MouseEvent) => act(event, () => emit('reply'))"
-          >
-            {{ t("assistant.approval.reply") }}
-          </OButton>
-          <OButton
-            v-if="planned && card.editable && !gated"
-            variant="ghost"
-            size="xs"
-            :disabled="sending"
-            focusable-unavailable
-            :class="TOUCH_TARGET_CLASS"
-            data-test="assistant-approval-edit"
-            @click="(event: MouseEvent) => act(event, edit)"
-          >
-            {{ t("assistant.approval.edit") }}
-          </OButton>
-        </template>
-        <OButton
-          v-if="moreTime"
-          variant="ghost"
-          size="xs"
-          :disabled="sending"
-          focusable-unavailable
-          :class="TOUCH_TARGET_CLASS"
-          data-test="assistant-approval-extend"
-          @click="(event: MouseEvent) => act(event, () => emit('extend'))"
-        >
-          {{ t("assistant.approval.moreTime") }}
-        </OButton>
-        <OButton
-          v-if="!question && !replying && !gated"
-          :variant="card.destructive ? 'destructive' : 'primary'"
-          size="xs"
-          :disabled="sending || nothingSelected"
-          focusable-unavailable
-          :class="['ms-auto', TOUCH_TARGET_CLASS]"
-          data-test="assistant-approval-approve"
-          @click="(event: MouseEvent) => act(event, approve)"
-        >
-          {{ approveLabel }}
-          <template v-if="nothingSelected && !sending" #unavailable-reason>
-            {{ t("assistant.approval.nothingSelected") }}
-          </template>
-        </OButton>
-      </div>
-      <OText v-if="narrowedNote" variant="meta" as="p" data-test="assistant-approval-narrowed">
-        {{ narrowedNote }}
-      </OText>
-
       <OCollapsible
         v-if="hasDetails && !replying"
         :default-open="gated"
@@ -247,15 +147,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
           >
             <li v-for="(line, index) in impact" :key="index" class="break-words">{{ line }}</li>
           </ul>
-          <OSelect
-            v-if="scopeOptions.length"
-            v-model="scope"
-            :options="scopeOptions"
-            :label="t('assistant.approval.scope.label')"
-            :disabled="sending"
-            size="sm"
-            data-test="assistant-approval-scope"
-          />
           <OCodeBlock
             v-if="card.args && !diff.length"
             :code="argsText"
@@ -282,6 +173,132 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
           </OButton>
         </div>
       </OCollapsible>
+      <OSelect
+        v-if="scopeOptions.length && !replying"
+        v-model="scope"
+        :options="scopeOptions"
+        :label="t('assistant.approval.scope.label')"
+        :disabled="sending"
+        size="sm"
+        class="self-start"
+        data-test="assistant-approval-scope"
+      />
+      <!-- The buttons stay while the decision is on its way, so focus stays where it was -->
+      <div
+        :class="[
+          'text-text-heading flex min-w-0 flex-wrap items-center gap-2',
+          !(question && !replying) && '-ms-2.5',
+        ]"
+      >
+        <template v-if="question && !replying">
+          <OButton
+            v-for="option in card.options ?? []"
+            :key="option.id"
+            variant="outline"
+            size="xs"
+            :disabled="sending"
+            focusable-unavailable
+            :class="TOUCH_TARGET_CLASS"
+            :data-test="`assistant-question-option-${option.id}`"
+            @click="(event: MouseEvent) => act(event, () => choose(option))"
+          >
+            {{ raw(option.label) }}
+          </OButton>
+          <OButton
+            v-if="moreTime"
+            variant="ghost"
+            size="xs"
+            :disabled="sending"
+            focusable-unavailable
+            :class="TOUCH_TARGET_CLASS"
+            data-test="assistant-approval-extend"
+            @click="(event: MouseEvent) => act(event, () => emit('extend'))"
+          >
+            {{ t("assistant.approval.moreTime") }}
+          </OButton>
+          <OButton
+            v-if="card.allowOther || !card.options?.length"
+            variant="ghost"
+            size="xs"
+            :disabled="sending"
+            focusable-unavailable
+            :class="TOUCH_TARGET_CLASS"
+            data-test="assistant-question-other"
+            @click="(event: MouseEvent) => act(event, () => emit('reply'))"
+          >
+            {{ t("assistant.question.otherAnswer") }}
+          </OButton>
+        </template>
+        <template v-else-if="!replying">
+          <OButton
+            ref="denyButton"
+            variant="ghost-neutral"
+            size="xs"
+            :disabled="sending"
+            focusable-unavailable
+            :class="TOUCH_TARGET_CLASS"
+            data-test="assistant-approval-deny"
+            @click="
+              (event: MouseEvent) => act(event, () => decide({ approved: false, reason: 'deny' }))
+            "
+          >
+            {{ t("assistant.approval.deny") }}
+          </OButton>
+          <OButton
+            variant="ghost-neutral"
+            size="xs"
+            :disabled="sending"
+            focusable-unavailable
+            :class="TOUCH_TARGET_CLASS"
+            data-test="assistant-approval-reply"
+            @click="(event: MouseEvent) => act(event, () => emit('reply'))"
+          >
+            {{ t("assistant.approval.reply") }}
+          </OButton>
+          <OButton
+            v-if="planned && card.editable && !gated"
+            variant="ghost"
+            size="xs"
+            :disabled="sending"
+            focusable-unavailable
+            :class="TOUCH_TARGET_CLASS"
+            data-test="assistant-approval-edit"
+            @click="(event: MouseEvent) => act(event, edit)"
+          >
+            {{ t("assistant.approval.edit") }}
+          </OButton>
+        </template>
+        <OButton
+          v-if="moreTime && (!question || replying)"
+          variant="ghost"
+          size="xs"
+          :disabled="sending"
+          focusable-unavailable
+          :class="TOUCH_TARGET_CLASS"
+          data-test="assistant-approval-extend"
+          @click="(event: MouseEvent) => act(event, () => emit('extend'))"
+        >
+          {{ t("assistant.approval.moreTime") }}
+        </OButton>
+        <OButton
+          v-if="!question && !replying && !gated"
+          :variant="card.destructive ? 'destructive' : 'primary'"
+          size="xs"
+          :disabled="sending || nothingSelected"
+          focusable-unavailable
+          :class="['ms-auto', TOUCH_TARGET_CLASS]"
+          data-test="assistant-approval-approve"
+          @click="(event: MouseEvent) => act(event, approve)"
+        >
+          {{ approveLabel }}
+          <template v-if="nothingSelected && !sending" #unavailable-reason>
+            {{ t("assistant.approval.nothingSelected") }}
+          </template>
+        </OButton>
+      </div>
+      <OText v-if="narrowedNote" variant="meta" as="p" data-test="assistant-approval-narrowed">
+        {{ narrowedNote }}
+      </OText>
     </section>
   </div>
 </template>
@@ -299,6 +316,7 @@ import { useRouter } from "vue-router";
 
 import { assistantGlyph } from "@/components/ai-assistant/common/glyphs";
 import { TOUCH_TARGET_CLASS } from "@/components/ai-assistant/common/touchTarget";
+import { stripClaimMarkers } from "@/components/ai-assistant/transcript/markdownCore";
 import {
   registerAssistantFocusTarget,
   assistantKeydownAt,
@@ -423,7 +441,10 @@ const planned = computed(
 const count = computed(() =>
   planned.value && props.card.editable ? selected.value.length : total.value,
 );
-const heading = computed(() => approvalHeading(t, props.card, count.value));
+const heading = computed(() => {
+  const text = approvalHeading(t, props.card, count.value);
+  return question.value ? raw(stripClaimMarkers(text)) : text;
+});
 const groupName = computed(() =>
   question.value
     ? t("assistant.question.needsAnswer", { question: heading.value })
@@ -557,7 +578,6 @@ const hasDetails = computed(
     !question.value &&
     (diff.value.length > 0 ||
       impact.value.length > 0 ||
-      scopeOptions.value.length > 0 ||
       !!editor.value ||
       !!props.card.args ||
       (!planned.value && allTargets.value.length > 1)),

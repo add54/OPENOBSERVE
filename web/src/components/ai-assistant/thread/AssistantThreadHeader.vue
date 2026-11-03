@@ -86,8 +86,21 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
                 aria-haspopup="menu"
                 class="max-w-full min-w-0 justify-start! gap-1 text-sm! font-medium text-inherit! max-md:min-h-11 pointer-coarse:min-h-11"
                 data-test="assistant-thread-title-button"
+                @pointerenter="measureTitle"
+                @focus="measureTitle"
               >
-                <OTruncatedText class="min-w-0">{{ titleText }}</OTruncatedText>
+                <!-- First in the slot so it anchors to the whole button, not a sibling; only a cut-off title needs it, never over its open menu (D2) -->
+                <OTooltip
+                  :content="titleTooltip"
+                  :disabled="menuOpen || !titleCut"
+                  max-width="22.5rem"
+                />
+                <span
+                  ref="titleEl"
+                  class="min-w-0 truncate"
+                  data-test="assistant-thread-title-text"
+                  >{{ titleText }}</span
+                >
                 <OIcon
                   :name="menuOpen ? assistantGlyph.collapse : assistantGlyph.expand"
                   size="xs"
@@ -104,7 +117,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
                   <span>{{ mark.count }}</span>
                 </span>
                 <OSpinner v-if="renamePending" size="xs" />
-                <OTooltip :content="titleTooltip" max-width="22.5rem" />
               </OButton>
             </template>
             <AssistantTitleMenu
@@ -121,9 +133,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
                     class="flex min-w-0 flex-col gap-1 px-3 py-1.5"
                     data-test="assistant-title-menu-header"
                   >
-                    <OTruncatedText class="text-text-heading min-w-0 text-sm font-medium">{{
-                      titleText
-                    }}</OTruncatedText>
+                    <OText as="span" variant="meta">{{ t("assistant.thread.thisChat") }}</OText>
                     <OTag
                       v-if="narrow && saveTag"
                       type="assistantSave"
@@ -296,7 +306,7 @@ import {
 import OTag from "@/lib/core/Badge/OTag.vue";
 import OButton from "@/lib/core/Button/OButton.vue";
 import OIcon from "@/lib/core/Icon/OIcon.vue";
-import OTruncatedText from "@/lib/core/Typography/OTruncatedText.vue";
+import OText from "@/lib/core/Typography/OText.vue";
 import OSpinner from "@/lib/feedback/Spinner/OSpinner.vue";
 import { toast } from "@/lib/feedback/Toast/useToast";
 import OInlineEdit from "@/lib/forms/InlineEdit/OInlineEdit.vue";
@@ -305,6 +315,7 @@ import ODropdownItem from "@/lib/overlay/Dropdown/ODropdownItem.vue";
 import ODropdownSeparator from "@/lib/overlay/Dropdown/ODropdownSeparator.vue";
 import ODropdownSub from "@/lib/overlay/Dropdown/ODropdownSub.vue";
 import OTooltip from "@/lib/overlay/Tooltip/OTooltip.vue";
+import { isElementTruncated } from "@/lib/overlay/Tooltip/useIsTruncated";
 import { trackAssistant } from "@/services/assistantAnalytics";
 import { raw, useI18nTyped, type I18nText } from "@/types/i18n";
 
@@ -335,6 +346,8 @@ const backButton = ref<InstanceType<typeof AssistantIconButton> | null>(null);
 const renaming = ref(false);
 const draft = ref("");
 const menuOpen = ref(false);
+const titleEl = ref<HTMLElement | null>(null);
+const titleCut = ref(false);
 const deleteOpen = ref(false);
 const widthRem = ref(Number.POSITIVE_INFINITY);
 const saveTagId = `assistant-thread-${useId()}-save`;
@@ -409,6 +422,10 @@ const titleTooltip = computed<I18nText>(() => {
   });
 });
 const downloading = computed(() => !!props.sid && exporter.busy.value.has(props.sid));
+
+function measureTitle(): void {
+  titleCut.value = isElementTruncated(titleEl.value);
+}
 
 function startRename(): void {
   if (!chatActions.value || renamePending.value) return;

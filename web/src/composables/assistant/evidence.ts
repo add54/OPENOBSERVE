@@ -341,6 +341,12 @@ export function queryCount(steps: StepFacts[]): number {
   return steps.filter((step) => QUERY_KINDS.has(step.kind) && step.state === "done").length;
 }
 
+/** Rows the finished trail shows: every step, with two or more read schemas folded into one; the live status counts the same. */
+export function trailRowCount(steps: StepFacts[]): number {
+  const schemas = steps.filter((step) => step.kind === "schema" && step.state === "done").length;
+  return steps.length - Math.max(0, schemas - 1);
+}
+
 /** Every query of the answer ran and reported zero rows; a policy-denied call or an unknown count is never empty (PO A26). */
 export function answerQueriesAllEmpty(
   message: ChatMessage | null | undefined,

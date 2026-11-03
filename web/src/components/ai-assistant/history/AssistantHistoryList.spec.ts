@@ -279,6 +279,8 @@ describe("AssistantHistoryList", () => {
     const inWindow = await setup({ container: "window" });
     inWindow.history.setFilter({ kind: "pinned" });
     await flushPromises();
+    const list = (w: typeof inWindow.wrapper) => w.get('[data-test="assistant-history"]');
+    expect(list(inWindow.wrapper).attributes("data-narrow")).toBeUndefined();
     expect(inWindow.wrapper.get('[data-test="assistant-history-filter"]').text()).toBe(
       "Filter · 1",
     );
@@ -286,7 +288,10 @@ describe("AssistantHistoryList", () => {
     const inSidebar = await setup({ container: "sidebar" });
     inSidebar.history.setFilter({ kind: "pinned" });
     await flushPromises();
-    expect(inSidebar.wrapper.get('[data-test="assistant-history-filter"]').text()).toBe("");
+    expect(list(inSidebar.wrapper).attributes("data-narrow")).toBe("");
+    expect(inSidebar.wrapper.get('[data-test="assistant-history-filter"]').text()).toBe(
+      "Filter · 1",
+    );
     rect.mockRestore();
   });
 

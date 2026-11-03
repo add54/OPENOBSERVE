@@ -75,6 +75,18 @@ describe("AssistantHistoryRow", () => {
     );
   });
 
+  it("drops the title bubble once the row is chosen, and brings it back after the pointer leaves (X1)", async () => {
+    const wrapper = setup();
+    const title = () => wrapper.get('[data-test="o-truncated-text"]');
+    expect(title().attributes("data-o-tooltip-off")).toBeUndefined();
+    const button = wrapper.get('[data-test="assistant-history-row"]');
+    await button.trigger("click");
+    expect(wrapper.emitted("open")).toHaveLength(1);
+    expect(title().attributes("data-o-tooltip-off")).toBe("");
+    await button.trigger("pointerleave");
+    expect(title().attributes("data-o-tooltip-off")).toBeUndefined();
+  });
+
   it("marks the current chat and keeps the other rows out of the Tab order", () => {
     const current = setup({}, { current: true });
     expect(current.get('[data-test="assistant-history-row"]').attributes("aria-current")).toBe(

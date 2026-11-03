@@ -21,6 +21,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
     side="top"
     :align="align"
     :aria-label="t('assistant.context.title')"
+    :collision-padding="inset"
     :content-class="`${widthClass} max-h-[min(32rem,70vh)] overflow-y-auto p-3`"
     @update:open="setOpen"
   >
@@ -61,11 +62,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
         :data-test="`assistant-context-sees-${group.id}`"
       >
         <OText v-if="group.id === 'not_read'" variant="label" as="h3">{{ group.title }}</OText>
-        <dl class="flex flex-col gap-1">
+        <dl class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1">
           <div
             v-for="row in group.rows"
             :key="row.id"
-            class="grid grid-cols-[10rem_minmax(0,1fr)] items-center gap-2 max-md:grid-cols-[minmax(0,8rem)_minmax(0,1fr)]"
+            class="col-span-2 grid grid-cols-subgrid items-center"
             data-test="assistant-context-sees-row"
             :data-field="row.id"
           >
@@ -111,6 +112,8 @@ export interface AssistantContextSeesPopoverProps {
 }
 
 const STREAMS_ROW = "selectedStreams";
+
+const PANEL_GAP_PX = 8;
 </script>
 
 <script setup lang="ts">
@@ -145,6 +148,7 @@ const layout = useComposerLayout();
 const headingId = `assistant-sees-${useId()}`;
 const heading = ref<InstanceType<typeof OText> | null>(null);
 const ownOpen = ref(false);
+const inset = ref<{ left: number; right: number } | undefined>(undefined);
 
 const isOpen = computed(() => props.open ?? ownOpen.value);
 const disclosure = computed(() =>
@@ -153,7 +157,9 @@ const disclosure = computed(() =>
     : t("assistant.context.seesDisclosure"),
 );
 const widthClass = computed(() =>
-  layout.value.tight ? "w-[calc(20rem-0.375rem)]" : "w-[min(28rem,calc(100vw-1.5rem))]",
+  layout.value.tight
+    ? "w-max max-w-[calc(20rem-0.375rem)]"
+    : "w-max max-w-[min(26rem,calc(100vw-1.5rem))]",
 );
 
 const groups = computed(() =>
@@ -168,6 +174,25 @@ const groups = computed(() =>
     .filter((group) => group.rows.length > 0),
 );
 
+function measureInset(): void {
+  const content = (heading.value?.$el as HTMLElement | undefined)?.closest<HTMLElement>(
+    "[data-o-popover-content]",
+  );
+  const id = content?.id;
+  const trigger = id
+    ? [...document.querySelectorAll<HTMLElement>("[aria-controls]")].find(
+        (el) => el.getAttribute("aria-controls") === id,
+      )
+    : null;
+  const box = trigger?.closest<HTMLElement>("[data-assistant-surface]")?.getBoundingClientRect();
+  inset.value = box
+    ? {
+        left: Math.max(0, box.left + PANEL_GAP_PX),
+        right: Math.max(0, window.innerWidth - box.right + PANEL_GAP_PX),
+      }
+    : undefined;
+}
+
 function setOpen(open: boolean): void {
   ownOpen.value = open;
   emit("update:open", open);
@@ -178,6 +203,7 @@ watch(isOpen, async (open) => {
   if (!open) return;
   trackAssistant("ai_context_inspected", { target: "sees" });
   await nextTick();
+  measureInset();
   (heading.value?.$el as HTMLElement | undefined)?.focus();
 });
 </script>

@@ -347,7 +347,8 @@ test.describe("assistant accessibility", () => {
       expect(await animations(), `streaming at ${width}`).toEqual([]);
       await expectClean(page, `reduced-motion-streaming-${width}`);
       if (width === 375) {
-        await assistant.sheet.locator('[data-test="assistant-shell-sheet-peek"]').click();
+        await assistant.sheet.locator('[data-test="assistant-shell-sheet-handle"]').focus();
+        await page.keyboard.press("ArrowDown");
         await expect(assistant.sheet).toHaveAttribute("data-snap", "peek");
         expect(await animations(), "sheet at peek").toEqual([]);
         await expectClean(page, "reduced-motion-sheet-peek-375");
@@ -632,7 +633,8 @@ test.describe("assistant accessibility", () => {
     await page.setViewportSize(VIEWPORTS[375]);
     await start(context, page);
     await openOnLogs(page);
-    await assistant.sheet.locator('[data-test="assistant-shell-sheet-peek"]').click();
+    await assistant.sheet.locator('[data-test="assistant-shell-sheet-handle"]').focus();
+    await page.keyboard.press("ArrowDown");
     await expect(assistant.sheet).toHaveAttribute("data-snap", "peek");
     await page.locator('[data-test="main-content"]').evaluate((el) => el.querySelector("button, a[href], input, [tabindex='0']")?.focus());
     expect(await obscuredWhileTabbing(page, '[data-test="assistant-shell-sheet"]')).toEqual([]);
