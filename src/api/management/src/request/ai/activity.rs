@@ -236,7 +236,7 @@ impl Recorder for LedgerRecorder {
         (status = 400, description = "Malformed cursor", body = Object),
         (status = 403, description = "Not a member of the organization", body = Object),
     ),
-    extensions(("x-o2-mcp" = json!({"enabled": false})))
+    extensions(("x-o2-ratelimit" = json!({"module": "AI", "operation": "list"})), ("x-o2-mcp" = json!({"enabled": false})))
 )]
 pub async fn list_activity(
     Path(org_id): Path<String>,
@@ -288,7 +288,7 @@ pub async fn list_activity(
         (status = 409, description = "Already undone, or `changed_since` with `changed_by` and `at`", body = Object),
         (status = 410, description = "The undo window passed (`undo_expired`)", body = Object),
     ),
-    extensions(("x-o2-mcp" = json!({"enabled": false})))
+    extensions(("x-o2-ratelimit" = json!({"module": "AI", "operation": "create"})), ("x-o2-mcp" = json!({"enabled": false})))
 )]
 pub async fn undo_action(
     Path((org_id, id)): Path<(String, String)>,

@@ -128,7 +128,7 @@ impl Deployment {
         (status = 200, description = "Settings (admins) or `{enabled}` (members)", body = SettingsView),
         (status = 403, description = "Not a member of the organization", body = Object),
     ),
-    extensions(("x-o2-mcp" = json!({"enabled": false})))
+    extensions(("x-o2-ratelimit" = json!({"module": "AI", "operation": "get"})), ("x-o2-mcp" = json!({"enabled": false})))
 )]
 pub async fn get_settings(
     Path(org_id): Path<String>,
@@ -170,7 +170,7 @@ pub async fn get_settings(
         (status = 400, description = "Unknown field, or sharing the deployment disables", body = Object),
         (status = 403, description = "Not an organization admin", body = Object),
     ),
-    extensions(("x-o2-mcp" = json!({"enabled": false})))
+    extensions(("x-o2-ratelimit" = json!({"module": "AI", "operation": "update"})), ("x-o2-mcp" = json!({"enabled": false})))
 )]
 pub async fn put_settings(
     Path(org_id): Path<String>,

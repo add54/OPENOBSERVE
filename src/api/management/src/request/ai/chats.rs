@@ -943,7 +943,7 @@ pub(super) fn lease_busy(active_turn_id: Option<String>) -> AiErrorEnvelope {
         (status = 200, description = "A page of conversations", body = inline(ChatListResponse)),
         (status = 400, description = "Invalid cursor or state", body = Object),
     ),
-    extensions(("x-o2-mcp" = json!({"enabled": false})))
+    extensions(("x-o2-ratelimit" = json!({"module": "AI", "operation": "list"})), ("x-o2-mcp" = json!({"enabled": false})))
 )]
 pub async fn list(
     Path(org_id): Path<String>,
@@ -1060,7 +1060,7 @@ pub async fn list(
         (status = 404, description = "Unknown conversation", body = Object),
         (status = 503, description = "History temporarily unreadable", body = Object),
     ),
-    extensions(("x-o2-mcp" = json!({"enabled": false})))
+    extensions(("x-o2-ratelimit" = json!({"module": "AI", "operation": "get"})), ("x-o2-mcp" = json!({"enabled": false})))
 )]
 pub async fn get(
     Path((org_id, session_id)): Path<(String, String)>,
@@ -1201,7 +1201,7 @@ pub async fn get(
         (status = 400, description = "Invalid title", body = Object),
         (status = 404, description = "Unknown conversation", body = Object),
     ),
-    extensions(("x-o2-mcp" = json!({"enabled": false})))
+    extensions(("x-o2-ratelimit" = json!({"module": "AI", "operation": "update"})), ("x-o2-mcp" = json!({"enabled": false})))
 )]
 pub async fn rename(
     Path((org_id, session_id)): Path<(String, String)>,
@@ -1276,7 +1276,7 @@ pub async fn rename(
         (status = 200, description = "Deleted", body = Object),
         (status = 404, description = "Unknown conversation", body = Object),
     ),
-    extensions(("x-o2-mcp" = json!({"enabled": false})))
+    extensions(("x-o2-ratelimit" = json!({"module": "AI", "operation": "delete"})), ("x-o2-mcp" = json!({"enabled": false})))
 )]
 pub async fn delete(
     Path((org_id, session_id)): Path<(String, String)>,
@@ -1330,7 +1330,7 @@ pub async fn delete(
     security(("Authorization" = [])),
     params(("org_id" = String, Path, description = "Organization name")),
     responses((status = 200, description = "Deleted", body = Object)),
-    extensions(("x-o2-mcp" = json!({"enabled": false})))
+    extensions(("x-o2-ratelimit" = json!({"module": "AI", "operation": "delete"})), ("x-o2-mcp" = json!({"enabled": false})))
 )]
 pub async fn delete_all(Path(org_id): Path<String>, in_req: axum::extract::Request) -> Response {
     let Some(user_email) = user_email(&in_req) else {
@@ -1384,7 +1384,7 @@ pub async fn delete_all(Path(org_id): Path<String>, in_req: axum::extract::Reque
         (status = 409, description = "Another import of the caller is running (`reason: import_busy`)", body = Object),
         (status = 413, description = "The body is over 32 MiB, or the organization's import quota is full (`reason: quota_exceeded`)", body = Object),
     ),
-    extensions(("x-o2-mcp" = json!({"enabled": false})))
+    extensions(("x-o2-ratelimit" = json!({"module": "AI", "operation": "create"})), ("x-o2-mcp" = json!({"enabled": false})))
 )]
 pub async fn import(Path(org_id): Path<String>, in_req: axum::extract::Request) -> Response {
     let Some(user_email) = user_email(&in_req) else {
@@ -1489,7 +1489,7 @@ pub async fn import(Path(org_id): Path<String>, in_req: axum::extract::Request) 
         (status = 429, description = "Too many open tails of this user or turn (`rate_limited`)", body = Object),
         (status = 503, description = "History temporarily unreadable", body = Object),
     ),
-    extensions(("x-o2-mcp" = json!({"enabled": false})))
+    extensions(("x-o2-ratelimit" = json!({"module": "AI", "operation": "get"})), ("x-o2-mcp" = json!({"enabled": false})))
 )]
 pub async fn stream_turn(
     Path((org_id, session_id, turn_id)): Path<(String, String, String)>,

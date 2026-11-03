@@ -2468,7 +2468,7 @@ pub(super) fn sse_response(body: Body) -> Response {
         (status = StatusCode::TOO_MANY_REQUESTS, description = "Upstream AI rate limit exceeded", body = Object),
         (status = StatusCode::BAD_GATEWAY, description = "Upstream AI service unavailable", body = Object),
     ),
-    extensions(
+    extensions(("x-o2-mcp" = json!({"enabled": false})), 
         ("x-o2-ratelimit" = json!({"module": "Chat", "operation": "create"}))
     )
 )]
@@ -2607,7 +2607,7 @@ impl TraceInfo {
         }),
     ),
     responses(
-        (status = StatusCode::OK, description = "Chat response", body = ()),
+        (status = StatusCode::OK, description = "Server-sent event stream", content_type = "text/event-stream"),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Internal Server Error", body = Object),
         (status = StatusCode::BAD_REQUEST, description = "Bad Request", body = Object),
         (status = StatusCode::PRECONDITION_FAILED, description = "Paid overage consent required", body = Object),
@@ -2647,6 +2647,26 @@ pub async fn chat_stream(Path(org_id): Path<String>, in_req: axum::extract::Requ
 }
 
 /// Forwards feedback to o2-ai and stores a vote with its chat; the answer carries `stored`.
+#[utoipa::path(
+    post,
+    path = "/{org_id}/ai/feedback",
+    context_path = "/api",
+    tag = "AI",
+    operation_id = "SubmitAiFeedback",
+    summary = "Submit feedback on an AI response",
+    security(("Authorization" = [])),
+    params(
+        ("org_id" = String, Path, description = "Organization name"),
+    ),
+    request_body(content = Object, description = "Request body", content_type = "application/json"),
+    responses(
+        (status = 200, description = "Success", content_type = "application/json", body = Object),
+    ),
+    extensions(
+        ("x-o2-ratelimit" = json!({"module": "Chat", "operation": "create"})),
+        ("x-o2-mcp" = json!({"enabled": false}))
+    )
+)]
 pub async fn feedback(Path(org_id): Path<String>, in_req: axum::extract::Request) -> Response {
     let (parts, body) = in_req.into_parts();
     if let Err(resp) = require_json(&parts.headers) {
@@ -2801,7 +2821,7 @@ pub async fn feedback(Path(org_id): Path<String>, in_req: axum::extract::Request
         ("session_id" = String, Path, description = "Chat session ID")
     ),
     request_body(
-        content = serde_json::Value,
+        content = Object,
         description = "Decision on a card: `{id, approved, scope?, items?, reply?}`, where `id` \
                        is the card's id (or its `call_id`), `scope` is `once`, `chat` or \
                        `always` (only for a grantable card), `items` approves a subset of a \
@@ -2819,7 +2839,7 @@ pub async fn feedback(Path(org_id): Path<String>, in_req: axum::extract::Request
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "The decision did not reach the assistant", body = Object),
         (status = StatusCode::GATEWAY_TIMEOUT, description = "The assistant did not answer in time; the decision may still apply", body = Object),
     ),
-    extensions(
+    extensions(("x-o2-ratelimit" = json!({"module": "AI", "operation": "create"})),
         ("x-o2-mcp" = json!({"enabled": false}))
     )
 )]
@@ -2955,6 +2975,7 @@ pub async fn confirm_action(
         ("org_id" = String, Path, description = "Organization name"),
         ("session_id" = String, Path, description = "Chat session ID")
     ),
+    request_body(content = Object, description = "Send {} or `{\"turn_id\": \"…\"}`; the handler requires a JSON content type", content_type = "application/json"),
     responses(
         (status = StatusCode::OK, description = "Cancellation forwarded", body = Object,
             example = json!({"cancelled": true, "owner_reached": true, "turn_id": "0199e7b2-6f0c-7a3e-a1b2-c3d4e5f60718"})),
@@ -2964,7 +2985,7 @@ pub async fn confirm_action(
         (status = StatusCode::UNSUPPORTED_MEDIA_TYPE, description = "The body is not JSON (send {})", body = Object),
         (status = StatusCode::INTERNAL_SERVER_ERROR, description = "Internal Server Error", body = Object),
     ),
-    extensions(
+    extensions(("x-o2-ratelimit" = json!({"module": "AI", "operation": "create"})),
         ("x-o2-mcp" = json!({"enabled": false}))
     )
 )]

@@ -564,7 +564,7 @@ impl Settings {
         (status = 200, description = "Capabilities", body = Capabilities),
         (status = 403, description = "Not a member of the organization", body = Object),
     ),
-    extensions(("x-o2-mcp" = json!({"enabled": false})))
+    extensions(("x-o2-ratelimit" = json!({"module": "AI", "operation": "get"})), ("x-o2-mcp" = json!({"enabled": false})))
 )]
 pub async fn get_capabilities(
     Path(org_id): Path<String>,
@@ -625,7 +625,7 @@ pub async fn get_capabilities(
         (status = 403, description = "Not an organization admin", body = Object),
         (status = 429, description = "A test of this organization or by this user ran less than 10 s ago (`rate_limited`)", body = Object),
     ),
-    extensions(("x-o2-mcp" = json!({"enabled": false})))
+    extensions(("x-o2-ratelimit" = json!({"module": "AI", "operation": "create"})), ("x-o2-mcp" = json!({"enabled": false})))
 )]
 pub async fn test_capabilities(
     Path(org_id): Path<String>,

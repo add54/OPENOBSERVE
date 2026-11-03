@@ -228,11 +228,15 @@ pub async fn organizations(
     security(
         ("Authorization"= [])
     ),
+    params(
+        ("org_id" = String, Path, description = "Organization name"),
+        ("page_size" = Option<i64>, Query, description = "Maximum number of organizations to return (default 100)"),
+    ),
     responses(
         (status = 200, description = "Success", content_type = "application/json", body = inline(AllOrganizationResponse)),
         (status = 403, description = "The caller is neither the root user nor a member of '_meta'", content_type = "application/json", body = Object),
     ),
-    extensions(
+    extensions(("x-o2-ratelimit" = json!({"module": "Organizations", "operation": "list"})), 
         ("x-o2-mcp" = json!({"enabled": false}))
     )
 )]
@@ -494,6 +498,7 @@ pub async fn update_user_passcode(
       ),
     responses(
         (status = 200, description = "Success", content_type = "application/json", body = inline(RumIngestionResponse)),
+        (status = 403, description = "Forbidden: the caller's role may not read the RUM token", content_type = "application/json", body = ()),
         (status = 404, description = "NotFound", content_type = "application/json", body = ()),
     ),
     extensions(
@@ -671,6 +676,9 @@ pub async fn create_org(
     context_path = "/api",
     tag = "Organizations",
     operation_id = "ExtendTrialPeriod",
+    params(
+        ("org_id" = String, Path, description = "Organization name"),
+    ),
     summary = "Extend organization trial period",
     description = "Extends the trial period for a specified organization to a new end date. This administrative endpoint allows extending trial periods for organizations, giving them more time to evaluate the service before requiring a paid subscription.",
     security(
@@ -678,9 +686,9 @@ pub async fn create_org(
     ),
     request_body(content = inline(ExtendTrialPeriodRequest), description = "Extend free trial request", content_type = "application/json"),
     responses(
-        (status = 200, description = "Success", content_type = "text", body = String),
+        (status = 200, description = "Success", content_type = "text/plain", body = String),
     ),
-    extensions(
+    extensions(("x-o2-ratelimit" = json!({"module": "Organizations", "operation": "update"})), 
         ("x-o2-mcp" = json!({"enabled": false}))
     )
 )]
@@ -850,7 +858,7 @@ fn usage_unavailable(error: anyhow::Error) -> Response {
         (status = 404, description = "Organization not found"),
         (status = 409, description = "`below_usage`: the limit is below the pool's current usage and `force` is not set"),
     ),
-    extensions(("x-o2-mcp" = json!({"enabled": false})))
+    extensions(("x-o2-ratelimit" = json!({"module": "Organizations", "operation": "update"})), ("x-o2-mcp" = json!({"enabled": false})))
 )]
 pub async fn set_quota_usage_limit(
     Path((org_id, pool)): Path<(String, String)>,
@@ -1061,15 +1069,18 @@ pub async fn set_paid_overage_status(
     context_path = "/api",
     tag = "Organizations",
     operation_id = "CreateExternalContract",
+    params(
+        ("org_id" = String, Path, description = "Organization name"),
+    ),
     summary = "Create an external contract subscription for an organization",
     security(
         ("Authorization"= [])
     ),
     request_body(content = inline(CreateExternalContractRequest), description = "Create external contract request", content_type = "application/json"),
     responses(
-        (status = 200, description = "Success", content_type = "application/json", body = String),
+        (status = 200, description = "Success", content_type = "application/json", body = Object),
     ),
-    extensions(
+    extensions(("x-o2-ratelimit" = json!({"module": "Organizations", "operation": "create"})), 
         ("x-o2-mcp" = json!({"enabled": false}))
     )
 )]
@@ -1179,15 +1190,18 @@ pub async fn create_external_contract(
     context_path = "/api",
     tag = "Organizations",
     operation_id = "ExtendExternalContract",
+    params(
+        ("org_id" = String, Path, description = "Organization name"),
+    ),
     summary = "Extend an external contract end date",
     security(
         ("Authorization"= [])
     ),
     request_body(content = inline(ExtendExternalContractRequest), description = "Extend external contract request", content_type = "application/json"),
     responses(
-        (status = 200, description = "Success", content_type = "application/json", body = String),
+        (status = 200, description = "Success", content_type = "application/json", body = Object),
     ),
-    extensions(
+    extensions(("x-o2-ratelimit" = json!({"module": "Organizations", "operation": "update"})), 
         ("x-o2-mcp" = json!({"enabled": false}))
     )
 )]
@@ -1257,9 +1271,9 @@ pub async fn extend_external_contract(
         ("target_org_id" = String, Path, description = "Target organization id"),
     ),
     responses(
-        (status = 200, description = "Success", content_type = "application/json", body = String),
+        (status = 200, description = "Success", content_type = "application/json", body = Object),
     ),
-    extensions(
+    extensions(("x-o2-ratelimit" = json!({"module": "Organizations", "operation": "delete"})), 
         ("x-o2-mcp" = json!({"enabled": false}))
     )
 )]
@@ -1311,6 +1325,9 @@ pub async fn revoke_external_contract(
     context_path = "/api",
     tag = "Organizations",
     operation_id = "EnableOrgStorage",
+    params(
+        ("org_id" = String, Path, description = "Organization name"),
+    ),
     summary = "Enable Org storage for an org",
     description = "Enables org level storage for an org.",
     security(
@@ -1318,9 +1335,9 @@ pub async fn revoke_external_contract(
     ),
     request_body(content = inline(EnableOrgStorageRequest), description = "Enable org storage request", content_type = "application/json"),
     responses(
-        (status = 200, description = "Success", content_type = "text", body = String),
+        (status = 200, description = "Success", content_type = "application/json", body = inline(MetaHttpResponse)),
     ),
-    extensions(
+    extensions(("x-o2-ratelimit" = json!({"module": "Organizations", "operation": "update"})), 
         ("x-o2-mcp" = json!({"enabled": false}))
     )
 )]
@@ -1414,7 +1431,11 @@ pub async fn rename_org(
         ("org_id" = String, Path, description = "Organization id"),
       ),
     responses(
-        (status = 200, description = "Success", content_type = "application/json", body = inline(OrganizationInviteUserRecord)),
+        (status = 200, description = "Success", content_type = "application/json", body = inline(Vec<OrganizationInviteUserRecord>)),
+    ),
+    extensions(
+        ("x-o2-ratelimit" = json!({"module": "Organizations", "operation": "list"})),
+        ("x-o2-mcp" = json!({"enabled": false}))
     )
 )]
 pub async fn get_org_invites(Path(path): Path<String>) -> Response {
@@ -1451,8 +1472,13 @@ pub async fn get_org_invites(Path(path): Path<String>) -> Response {
     params(
         ("org_id" = String, Path, description = "Organization id"),
       ),
+    request_body(content = inline(OrganizationInvites), description = "Emails to invite and the role they join with", content_type = "application/json"),
     responses(
-        (status = 200, description = "Success", content_type = "application/json", body = inline(Organization)),
+        (status = 200, description = "Success", content_type = "application/json", body = inline(common::meta::organization::OrganizationInviteResponse)),
+    ),
+    extensions(
+        ("x-o2-ratelimit" = json!({"module": "Organizations", "operation": "create"})),
+        ("x-o2-mcp" = json!({"enabled": false}))
     )
 )]
 pub async fn generate_org_invite(
@@ -1477,15 +1503,20 @@ pub async fn generate_org_invite(
     context_path = "/api",
     tag = "Organizations",
     operation_id = "RemoveOrganizationInvite",
+    summary = "Delete an organization invite",
     security(
         ("Authorization"= [])
     ),
     params(
         ("org_id" = String, Path, description = "Organization id"),
-        ("id" = String, Path, description = "invitation token"),
+        ("token" = String, Path, description = "invitation token"),
       ),
     responses(
-        (status = 200, description = "Success", content_type = "application/json", body = inline(Organization)),
+        (status = 200, description = "Success", content_type = "application/json", body = String),
+    ),
+    extensions(
+        ("x-o2-ratelimit" = json!({"module": "Organizations", "operation": "delete"})),
+        ("x-o2-mcp" = json!({"enabled": false}))
     )
 )]
 pub async fn delete_org_invite(Path(path): Path<(String, String)>) -> Response {
@@ -1515,7 +1546,11 @@ pub async fn delete_org_invite(Path(path): Path<(String, String)>) -> Response {
         ("invite_token" = String, Path, description = "The token sent to the user"),
       ),
     responses(
-        (status = 200, description = "Success", content_type = "application/json", body = inline(Organization)),
+        (status = 200, description = "Success", content_type = "application/json", body = inline(MetaHttpResponse)),
+    ),
+    extensions(
+        ("x-o2-ratelimit" = json!({"module": "Organizations", "operation": "update"})),
+        ("x-o2-mcp" = json!({"enabled": false}))
     )
 )]
 pub async fn accept_org_invite(
@@ -1557,14 +1592,14 @@ pub async fn accept_org_invite(
     ),
     params(
         ("org_id" = String, Path, description = "Must be '_meta'"),
-        ("regions" = String, Query, description = "Optional comma-separated list of regions to filter by (e.g., 'us-east-1,us-west-2')")
+        ("regions" = Option<String>, Query, description = "Optional comma-separated list of regions to filter by (e.g., 'us-east-1,us-west-2')")
     ),
     responses(
         (status = 200, description = "Success", content_type = "application/json", body = inline(NodeListResponse)),
         (status = 403, description = "Forbidden - Not the _meta organization", content_type = "application/json", body = ()),
         (status = 404, description = "NotFound", content_type = "application/json", body = ()),
     ),
-    extensions(
+    extensions(("x-o2-ratelimit" = json!({"module": "Clusters", "operation": "list"})), 
         ("x-o2-mcp" = json!({"enabled": false}))
     )
 )]
@@ -1649,14 +1684,14 @@ pub async fn node_list_impl(
     ),
     params(
         ("org_id" = String, Path, description = "Must be '_meta'"),
-        ("regions" = String, Query, description = "Optional comma-separated list of regions to filter by (e.g., 'us-east-1,us-west-2')")
+        ("regions" = Option<String>, Query, description = "Optional comma-separated list of regions to filter by (e.g., 'us-east-1,us-west-2')")
     ),
     responses(
         (status = 200, description = "Success", content_type = "application/json", body = inline(ClusterInfoResponse)),
         (status = 403, description = "Forbidden - Not the _meta organization", content_type = "application/json", body = ()),
         (status = 404, description = "NotFound", content_type = "application/json", body = ()),
     ),
-    extensions(
+    extensions(("x-o2-ratelimit" = json!({"module": "Clusters", "operation": "get"})), 
         ("x-o2-mcp" = json!({"enabled": false}))
     )
 )]
@@ -1710,6 +1745,25 @@ pub async fn cluster_info(
 
 /// InitiateOrgDeletion
 #[cfg(feature = "cloud")]
+#[utoipa::path(
+    delete,
+    path = "/{org_id}/organizations",
+    context_path = "/api",
+    tag = "Organizations",
+    operation_id = "InitiateOrgDeletion",
+    summary = "Start deleting an organization",
+    security(("Authorization" = [])),
+    params(
+        ("org_id" = String, Path, description = "Organization name"),
+    ),
+    responses(
+        (status = 200, description = "Success", content_type = "application/json", body = Object),
+    ),
+    extensions(
+        ("x-o2-ratelimit" = json!({"module": "Organizations", "operation": "delete"})),
+        ("x-o2-mcp" = json!({"enabled": false}))
+    )
+)]
 pub async fn initiate_org_deletion(
     Headers(user_email): Headers<UserEmail>,
     Path(org_id): Path<String>,
@@ -1739,6 +1793,26 @@ pub async fn initiate_org_deletion(
 
 /// ResurrectOrg — _meta admin action to cancel a pending deletion.
 #[cfg(feature = "cloud")]
+#[utoipa::path(
+    post,
+    path = "/{org_id}/organizations/{target_org_id}/resurrect",
+    context_path = "/api",
+    tag = "Organizations",
+    operation_id = "ResurrectOrg",
+    summary = "Cancel the deletion of an organization",
+    security(("Authorization" = [])),
+    params(
+        ("org_id" = String, Path, description = "Organization name"),
+        ("target_org_id" = String, Path, description = "Target org id"),
+    ),
+    responses(
+        (status = 200, description = "Success", content_type = "application/json", body = Object),
+    ),
+    extensions(
+        ("x-o2-ratelimit" = json!({"module": "Organizations", "operation": "update"})),
+        ("x-o2-mcp" = json!({"enabled": false}))
+    )
+)]
 pub async fn resurrect_org_deletion(
     Headers(user_email): Headers<UserEmail>,
     Path((meta_org, target_org_id)): Path<(String, String)>,
@@ -1757,6 +1831,26 @@ pub async fn resurrect_org_deletion(
 }
 
 #[cfg(not(feature = "cloud"))]
+#[utoipa::path(
+    post,
+    path = "/{org_id}/organizations/{target_org_id}/resurrect",
+    context_path = "/api",
+    tag = "Organizations",
+    operation_id = "ResurrectOrg",
+    summary = "Cancel the deletion of an organization",
+    security(("Authorization" = [])),
+    params(
+        ("org_id" = String, Path, description = "Organization name"),
+        ("target_org_id" = String, Path, description = "Target org id"),
+    ),
+    responses(
+        (status = 200, description = "Success", content_type = "application/json", body = Object),
+    ),
+    extensions(
+        ("x-o2-ratelimit" = json!({"module": "Organizations", "operation": "update"})),
+        ("x-o2-mcp" = json!({"enabled": false}))
+    )
+)]
 pub async fn resurrect_org_deletion(
     Path((_meta_org, _target_org_id)): Path<(String, String)>,
 ) -> Response {
@@ -1764,6 +1858,26 @@ pub async fn resurrect_org_deletion(
 }
 
 /// ListOrgCleanupTasks - admin endpoint to inspect cleanup task state for an org
+#[utoipa::path(
+    get,
+    path = "/{org_id}/org_cleanup_tasks/{target_org_id}",
+    context_path = "/api",
+    tag = "Organizations",
+    operation_id = "ListOrgCleanupTasks",
+    summary = "List cleanup tasks of a deleted organization",
+    security(("Authorization" = [])),
+    params(
+        ("org_id" = String, Path, description = "Organization name"),
+        ("target_org_id" = String, Path, description = "Target org id"),
+    ),
+    responses(
+        (status = 200, description = "Success", content_type = "application/json", body = inline(Vec<Object>)),
+    ),
+    extensions(
+        ("x-o2-ratelimit" = json!({"module": "Organizations", "operation": "list"})),
+        ("x-o2-mcp" = json!({"enabled": false}))
+    )
+)]
 pub async fn list_org_cleanup_tasks(
     Path((meta_org, target_org_id)): Path<(String, String)>,
 ) -> Response {
@@ -1789,6 +1903,26 @@ pub async fn list_org_cleanup_tasks(
 }
 
 #[cfg(feature = "cloud")]
+#[utoipa::path(
+    post,
+    path = "/{org_id}/org_cleanup_tasks/{target_org_id}/retry",
+    context_path = "/api",
+    tag = "Organizations",
+    operation_id = "RetryOrgCleanup",
+    summary = "Retry cleanup of a deleted organization",
+    security(("Authorization" = [])),
+    params(
+        ("org_id" = String, Path, description = "Organization name"),
+        ("target_org_id" = String, Path, description = "Target org id"),
+    ),
+    responses(
+        (status = 200, description = "Success", content_type = "application/json", body = Object),
+    ),
+    extensions(
+        ("x-o2-ratelimit" = json!({"module": "Organizations", "operation": "update"})),
+        ("x-o2-mcp" = json!({"enabled": false}))
+    )
+)]
 pub async fn retry_org_cleanup(
     Headers(user_email): Headers<UserEmail>,
     Path((_org_id, target_org_id)): Path<(String, String)>,
@@ -1803,6 +1937,26 @@ pub async fn retry_org_cleanup(
 }
 
 #[cfg(not(feature = "cloud"))]
+#[utoipa::path(
+    post,
+    path = "/{org_id}/org_cleanup_tasks/{target_org_id}/retry",
+    context_path = "/api",
+    tag = "Organizations",
+    operation_id = "RetryOrgCleanup",
+    summary = "Retry cleanup of a deleted organization",
+    security(("Authorization" = [])),
+    params(
+        ("org_id" = String, Path, description = "Organization name"),
+        ("target_org_id" = String, Path, description = "Target org id"),
+    ),
+    responses(
+        (status = 200, description = "Success", content_type = "application/json", body = Object),
+    ),
+    extensions(
+        ("x-o2-ratelimit" = json!({"module": "Organizations", "operation": "update"})),
+        ("x-o2-mcp" = json!({"enabled": false}))
+    )
+)]
 pub async fn retry_org_cleanup(
     Path((_org_id, _target_org_id)): Path<(String, String)>,
 ) -> Response {

@@ -108,7 +108,7 @@ impl AccessIo for LiveIo {
         (status = 403, description = "Not a member of the organization", body = Object),
         (status = 429, description = "Already asked this UTC day (`rate_limited`, `retry_after`)", body = Object),
     ),
-    extensions(("x-o2-mcp" = json!({"enabled": false})))
+    extensions(("x-o2-ratelimit" = json!({"module": "AI", "operation": "create"})), ("x-o2-mcp" = json!({"enabled": false})))
 )]
 pub async fn create_access_request(
     Path(org_id): Path<String>,

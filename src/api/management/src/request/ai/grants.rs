@@ -90,7 +90,7 @@ struct Requested {
         (status = 200, description = "Grants, newest first", body = Vec<GrantView>),
         (status = 403, description = "Not a member of the organization", body = Object),
     ),
-    extensions(("x-o2-mcp" = json!({"enabled": false})))
+    extensions(("x-o2-ratelimit" = json!({"module": "AI", "operation": "list"})), ("x-o2-mcp" = json!({"enabled": false})))
 )]
 pub async fn list_grants(
     Path(org_id): Path<String>,
@@ -131,7 +131,7 @@ pub async fn list_grants(
         (status = 204, description = "Revoked"),
         (status = 404, description = "No such grant visible to the caller", body = Object),
     ),
-    extensions(("x-o2-mcp" = json!({"enabled": false})))
+    extensions(("x-o2-ratelimit" = json!({"module": "AI", "operation": "delete"})), ("x-o2-mcp" = json!({"enabled": false})))
 )]
 pub async fn delete_grant(
     Path((org_id, id)): Path<(String, String)>,
