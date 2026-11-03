@@ -87,6 +87,9 @@ const NAME_ANALYZER: &str = "o2_stem";
 /// Tantivy's built-in analyzer for descriptions and categories: lowercased, stemmed.
 const TEXT_ANALYZER: &str = "en_stem";
 
+/// Maximum allowed query length to prevent DoS via pathological inputs
+const MAX_SEARCH_QUERY_LEN: usize = 500;
+
 /// Build the schema exposed to MCP clients from the schema retained for HTTP execution.
 fn public_tool_schema(http_path: &str, mut execution_schema: Value) -> Value {
     if !http_path.contains("{org_id}") {
@@ -196,8 +199,6 @@ fn name_analyzer(collect_type: CollectType) -> TextAnalyzer {
 
 /// Build a tantivy index over `tools`, independent of the process-wide index.
 fn build_index(tools: &[Arc<MCPTool>]) -> Result<ToolSearchIndex> {
-    // Use the O2 tokenizer for the name field to handle CamelCase splitting
-    // (e.g., "CreateDashboard" → "create", "dashboard"; "HTTPClient" → "http", "client")
     let analyzed = |analyzer: &str| {
         TextOptions::default().set_indexing_options(
             TextFieldIndexing::default()
@@ -287,31 +288,6 @@ fn build_search_index(tools: &[Arc<MCPTool>]) -> Result<()> {
     Ok(())
 }
 
-/// Maximum allowed query length to prevent DoS via pathological inputs
-const MAX_SEARCH_QUERY_LEN: usize = 500;
-
-/// URL of this node's own HTTP listener, which tool calls are looped back to.
-fn loopback_base_url(
-    scheme: &str,
-    bind_addr: &str,
-    ipv6_enabled: bool,
-    port: u16,
-    base_uri: &str,
-) -> Result<url::Url> {
-    // In IPv6 mode the server binds `[::]` and ignores `ZO_HTTP_ADDR` (see `server_addr`).
-    let specific_ip = bind_addr
-        .trim_matches(['[', ']'])
-        .parse::<IpAddr>()
-        .ok()
-        .filter(|ip| !ipv6_enabled && !ip.is_unspecified());
-    let authority = specific_ip.map_or_else(
-        || format!("localhost:{port}"),
-        |ip| SocketAddr::new(ip, port).to_string(),
-    );
-    url::Url::parse(&format!("{scheme}://{authority}{base_uri}"))
-        .map_err(|e| anyhow::anyhow!("Invalid base URL: {e}"))
-}
-
 /// The top `limit` tools of `search_index` matching `query`, best BM25 score first.
 fn search_in(search_index: &ToolSearchIndex, query: &str, limit: usize) -> Vec<MCPTool> {
     // Validate input
@@ -399,8 +375,29 @@ fn search_in(search_index: &ToolSearchIndex, query: &str, limit: usize) -> Vec<M
     results
 }
 
-/// Search for tools matching a query string using BM25 scoring.
-/// Returns the top `limit` matching MCPTool objects with full schemas.
+/// URL of this node's own HTTP listener, which tool calls are looped back to.
+fn loopback_base_url(
+    scheme: &str,
+    bind_addr: &str,
+    ipv6_enabled: bool,
+    port: u16,
+    base_uri: &str,
+) -> Result<url::Url> {
+    // In IPv6 mode the server binds `[::]` and ignores `ZO_HTTP_ADDR` (see `server_addr`).
+    let specific_ip = bind_addr
+        .trim_matches(['[', ']'])
+        .parse::<IpAddr>()
+        .ok()
+        .filter(|ip| !ipv6_enabled && !ip.is_unspecified());
+    let authority = specific_ip.map_or_else(
+        || format!("localhost:{port}"),
+        |ip| SocketAddr::new(ip, port).to_string(),
+    );
+    url::Url::parse(&format!("{scheme}://{authority}{base_uri}"))
+        .map_err(|e| anyhow::anyhow!("Invalid base URL: {e}"))
+}
+
+/// Top `limit` tools matching `query` by BM25 score, with their full input schemas.
 pub fn tool_search(query: &str, limit: usize) -> Vec<MCPTool> {
     match TOOL_SEARCH_INDEX.get() {
         Some(search_index) => search_in(search_index, query, limit),
@@ -809,9 +806,14 @@ mod tests {
     }
 
     #[test]
-    fn a_singular_query_finds_plural_descriptions_and_categories() {
-        // The name has no word to match, so only the description and category can.
-        let index = build_index(&[tool("Op1", "List all widgets", "widgets")]).unwrap();
+    fn a_singular_query_finds_plural_descriptions() {
+        let index = build_index(&[tool("Op1", "List all widgets", "misc")]).unwrap();
+        assert_eq!(found(&index, "widget", 3), ["Op1"]);
+    }
+
+    #[test]
+    fn a_singular_query_finds_plural_categories() {
+        let index = build_index(&[tool("Op1", "Do things", "widgets")]).unwrap();
         assert_eq!(found(&index, "widget", 3), ["Op1"]);
     }
 

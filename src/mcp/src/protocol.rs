@@ -28,7 +28,7 @@ use super::{
 /// Answer given to tool calls when the MCP tool registry was never built.
 const MCP_DISABLED_MESSAGE: &str = "MCP is disabled on this node (ZO_MCP_ENABLED=false)";
 
-/// Largest tool result text sent to a client; a larger one cannot fit a model's context window.
+/// Largest upstream text a tool result carries; more would swamp most models' context windows.
 const MAX_TOOL_RESULT_BYTES: usize = 1024 * 1024;
 
 /// A failed request, carrying the JSON-RPC code the client should see.
@@ -38,10 +38,10 @@ struct RpcError {
 }
 
 impl RpcError {
-    fn invalid_params(message: impl Into<String>) -> Self {
+    fn invalid_params(message: String) -> Self {
         Self {
             code: MCPErrorCode::InvalidParams,
-            message: message.into(),
+            message,
         }
     }
 }
@@ -516,14 +516,44 @@ fn authorized_client(auth_token: Option<String>) -> rmcp_openapi::HttpClient {
 }
 
 /// What a client may be told of a failed API request; the cause stays in the server log.
-fn execution_failure_text(error: &ToolCallExecutionError) -> &'static str {
+fn execution_failure_text(
+    error: &ToolCallExecutionError,
+    tool: &rmcp_openapi::ToolMetadata,
+) -> &'static str {
+    // rmcp-openapi adds `timeout_seconds` only to tools with query, header or cookie parameters.
+    let accepts_timeout = tool.parameters["properties"]
+        .get("timeout_seconds")
+        .is_some();
     match error {
         ToolCallExecutionError::NetworkError {
             category: NetworkErrorCategory::Timeout,
             ..
-        } => "the request timed out; retry with a narrower request or a larger `timeout_seconds`",
-        _ => "the request to the OpenObserve API could not be completed",
+        } => {
+            if accepts_timeout {
+                "the request timed out; retry with a narrower request or a larger `timeout_seconds`"
+            } else {
+                "the request timed out; retry with a narrower request"
+            }
+        }
+        ToolCallExecutionError::NetworkError { .. }
+        | ToolCallExecutionError::HttpError { .. }
+        | ToolCallExecutionError::ResponseParsingError { .. } => {
+            "the request to the OpenObserve API could not be completed"
+        }
     }
+}
+
+/// `text` cut to `MAX_TOOL_RESULT_BYTES` at a character boundary, marked when it was longer.
+fn clipped(text: &str) -> String {
+    if text.len() <= MAX_TOOL_RESULT_BYTES {
+        return text.to_string();
+    }
+    let mut end = MAX_TOOL_RESULT_BYTES;
+    // Index 0 is always a character boundary, so this stops before `end` underflows.
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}… [truncated]", &text[..end])
 }
 
 fn error_result(text: String) -> ToolsCallResult {
@@ -561,23 +591,20 @@ async fn execute_tool(
         }
         Err(ToolCallError::Execution(e)) => {
             log::warn!("MCP tool {} failed: {e}", metadata.name);
-            let reason = execution_failure_text(&e);
+            let reason = execution_failure_text(&e, metadata);
             return error_result(format!("Tool execution failed: {reason}"));
         }
     };
 
-    // Convert HTTP response to our format
-    let is_error = !http_response.is_success;
-    let content_text = if is_error {
-        format!(
+    if !http_response.is_success {
+        return error_result(format!(
             "Error {}: {}",
-            http_response.status_code, http_response.body
-        )
-    } else {
-        // Apply response filtering based on detail level
-        filter_response(&metadata.name, &http_response.body, detail)
-    };
+            http_response.status_code,
+            clipped(&http_response.body)
+        ));
+    }
 
+    let content_text = filter_response(&metadata.name, &http_response.body, detail);
     if content_text.len() > MAX_TOOL_RESULT_BYTES {
         return error_result(format!(
             "Result too large: {} bytes exceeds the {MAX_TOOL_RESULT_BYTES}-byte limit. Retry \
@@ -585,9 +612,6 @@ async fn execute_tool(
              fields).",
             content_text.len()
         ));
-    }
-    if is_error {
-        return error_result(content_text);
     }
 
     ToolsCallResult {
@@ -1208,7 +1232,6 @@ mod tests {
         (listener, base)
     }
 
-    /// A client whose server answers one request with `status` and `body`.
     async fn client_answering(status: &'static str, body: Vec<u8>) -> rmcp_openapi::HttpClient {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -1233,7 +1256,6 @@ mod tests {
         rmcp_openapi::HttpClient::new().with_base_url(base).unwrap()
     }
 
-    /// A client whose server accepts the connection and never answers.
     async fn client_never_answered() -> rmcp_openapi::HttpClient {
         let (listener, base) = loopback_listener().await;
         tokio::spawn(async move {
@@ -1243,7 +1265,6 @@ mod tests {
         rmcp_openapi::HttpClient::new().with_base_url(base).unwrap()
     }
 
-    /// A client whose server is gone, so connecting is refused.
     async fn client_refused() -> rmcp_openapi::HttpClient {
         let (listener, base) = loopback_listener().await;
         drop(listener);
@@ -1268,7 +1289,6 @@ mod tests {
         }
     }
 
-    /// A JSON object body of exactly `len` bytes.
     fn json_body_of(len: usize) -> Vec<u8> {
         let pad = "x".repeat(len - r#"{"pad":""}"#.len());
         format!(r#"{{"pad":"{pad}"}}"#).into_bytes()
@@ -1354,7 +1374,95 @@ mod tests {
             text.contains(&(MAX_TOOL_RESULT_BYTES + 1).to_string()),
             "{text}"
         );
+        assert!(
+            text.contains(&format!("{MAX_TOOL_RESULT_BYTES}-byte limit")),
+            "{text}"
+        );
+        assert!(text.contains("narrower request"), "{text}");
         assert!(text.len() < 512, "{}", text.len());
+    }
+
+    #[tokio::test]
+    async fn an_oversized_error_body_keeps_its_status_and_is_clipped() {
+        let body = json_body_of(2 * MAX_TOOL_RESULT_BYTES);
+        let client = client_answering("500 Internal Server Error", body).await;
+        let result = run(&client, json!({ "dashboard_id": "d1" })).await;
+
+        assert_eq!(result.is_error, Some(true));
+        let text = text_of(&result);
+        assert!(
+            text.starts_with(r#"Error 500: {"pad":"x"#),
+            "{}",
+            &text[..40]
+        );
+        assert!(text.ends_with("… [truncated]"));
+        assert!(text.len() < MAX_TOOL_RESULT_BYTES + 64, "{}", text.len());
+    }
+
+    #[test]
+    fn clipping_cuts_at_a_character_boundary() {
+        assert_eq!(clipped("short"), "short");
+
+        // 3-byte characters: the limit falls inside one, so the cut must move back.
+        let clipped_text = clipped(&"€".repeat(MAX_TOOL_RESULT_BYTES));
+        let kept = clipped_text.strip_suffix("… [truncated]").unwrap();
+        assert!(kept.len() <= MAX_TOOL_RESULT_BYTES);
+        assert!(kept.chars().all(|c| c == '€'));
+    }
+
+    #[test]
+    fn the_timeout_hint_names_timeout_seconds_only_for_tools_that_accept_it() {
+        let timeout = ToolCallExecutionError::NetworkError {
+            message: String::new(),
+            category: NetworkErrorCategory::Timeout,
+        };
+        let mut without = lookup_tool();
+        without.parameters["properties"]
+            .as_object_mut()
+            .unwrap()
+            .remove("timeout_seconds");
+
+        assert!(execution_failure_text(&timeout, &lookup_tool()).contains("`timeout_seconds`"));
+        let text = execution_failure_text(&timeout, &without);
+        assert!(
+            text.contains("timed out") && !text.contains("timeout_seconds"),
+            "{text}"
+        );
+    }
+
+    struct CapturedLogs;
+
+    static LOGGED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+    impl log::Log for CapturedLogs {
+        fn enabled(&self, _: &log::Metadata) -> bool {
+            true
+        }
+
+        fn log(&self, record: &log::Record) {
+            LOGGED.lock().unwrap().push(record.args().to_string());
+        }
+
+        fn flush(&self) {}
+    }
+
+    #[tokio::test]
+    async fn the_cause_of_a_failed_call_is_logged_but_not_shown() {
+        let _ = log::set_logger(&CapturedLogs);
+        log::set_max_level(log::LevelFilter::Warn);
+
+        let result = run(&client_refused().await, json!({ "dashboard_id": "d1" })).await;
+
+        assert!(!text_of(&result).contains("127.0.0.1"));
+        // Copied out so a failed assertion cannot poison the lock the logger takes.
+        let logged = LOGGED.lock().unwrap().clone();
+        assert!(
+            logged
+                .iter()
+                .any(|line| line.contains("MCP tool GetDashboard failed")
+                    && line.contains("127.0.0.1")),
+            "{logged:?}"
+        );
     }
 
     #[tokio::test]
