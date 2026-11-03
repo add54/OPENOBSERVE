@@ -47,6 +47,7 @@ vi.mock("@/services/oncall", () => ({
     getSchedule: vi.fn(),
     escalationProgress: vi.fn(),
     getResponse: vi.fn(),
+    myOnCall: vi.fn(),
   },
 }));
 
@@ -64,7 +65,7 @@ vi.mock("@/services/alert_destination", () => ({
 }));
 
 vi.mock("@/services/incidents", () => ({
-  default: { get: vi.fn() },
+  default: { get: vi.fn(), list: vi.fn() },
 }));
 
 const push = vi.fn();
@@ -295,6 +296,10 @@ describe("OnCallResponses", () => {
       data: { fired: [], next_targets: [], next_at: null, exhausted: false },
     } as any);
     service.getResponse.mockResolvedValue({ data: { events: [] } } as any);
+    service.myOnCall.mockResolvedValue({
+      data: { at: 0, user_email: "example@gmail.com", on_call_now: false, teams: [] },
+    } as any);
+    incidents.list.mockResolvedValue({ data: { incidents: [], total: 0 } } as any);
   });
 
   function page(over: Record<string, unknown> = {}, source = "al_ckt") {
@@ -1493,6 +1498,14 @@ describe("OnCallResponses", () => {
           },
         ],
       } as any);
+      service.myOnCall.mockResolvedValue({
+        data: {
+          at: 0,
+          user_email: "example@gmail.com",
+          on_call_now: true,
+          teams: [{ team_id: "team_1", team_name: "Platform", on_call_now: true }],
+        },
+      } as any);
       try {
         const wrapper = await withPages([page()]);
 
@@ -1503,6 +1516,150 @@ describe("OnCallResponses", () => {
       } finally {
         now.mockRestore();
       }
+    });
+  });
+
+  describe("request fan-out", () => {
+    const teamCalls = (fn: { mock: { calls: unknown[][] } }) =>
+      fn.mock.calls.map((call) => (call[0] as { team_id: string }).team_id).sort();
+    const otherTeam = (id: string) => ({ ...team, id, name: id });
+    const myTeams = (ids: string[]) =>
+      service.myOnCall.mockResolvedValue({
+        data: {
+          at: 0,
+          user_email: "example@gmail.com",
+          on_call_now: true,
+          teams: ids.map((id) => ({ team_id: id, team_name: id, on_call_now: true })),
+        },
+      } as any);
+
+    it("names incidents from one list read and fetches only the ones it missed", async () => {
+      incidents.list.mockResolvedValue({
+        data: {
+          incidents: [
+            { id: "inc_1", title: "Checkout down" },
+            { id: "inc_2", title: "Payments slow" },
+          ],
+          total: 2,
+        },
+      } as any);
+      incidents.get.mockResolvedValue({ data: { title: "Search stalled" } } as any);
+
+      const wrapper = await withPages([
+        page({ id: "a", incident_id: "inc_1" }),
+        page({ id: "b", incident_id: "inc_2" }, "al_b"),
+        page({ id: "c", incident_id: "inc_3" }, "al_c"),
+      ]);
+
+      expect(incidents.list).toHaveBeenCalledTimes(1);
+      expect(incidents.get.mock.calls.map((call) => call[1])).toEqual(["inc_3"]);
+      for (const title of ["Checkout down", "Payments slow", "Search stalled"]) {
+        expect(wrapper.text()).toContain(title);
+      }
+    });
+
+    it("re-reads the incident list on refresh and still fetches only the ids it missed", async () => {
+      incidents.list.mockResolvedValue({
+        data: { incidents: [{ id: "inc_1", title: "Checkout down" }], total: 1 },
+      } as any);
+      incidents.get.mockResolvedValue({ data: { title: "Search stalled" } } as any);
+      const wrapper = await withPages([
+        page({ id: "a", incident_id: "inc_1" }),
+        page({ id: "c", incident_id: "inc_3" }, "al_c"),
+      ]);
+
+      await wrapper.find('[data-test="oncall-responses-refresh"]').trigger("click");
+      await flushPromises();
+
+      expect(incidents.list).toHaveBeenCalledTimes(2);
+      expect(incidents.get.mock.calls.map((call) => call[1])).toEqual(["inc_3", "inc_3"]);
+    });
+
+    it("shows the row teams' rotation without waiting for the viewer's teams", async () => {
+      service.myOnCall.mockReturnValue(new Promise(() => {}) as any);
+      service.whoIsOnCall.mockResolvedValue({
+        data: [
+          { rotation_id: "r", rotation_name: "Primary", rule: "Base", user_email: "ana@o2.ai" },
+        ],
+      } as any);
+      const wrapper = await withPages([page()]);
+
+      const shown = wrapper.findAllComponents({ name: "OUserCell" }).map((c) => c.props("value"));
+      expect(shown).toEqual(["ana@o2.ai"]);
+    });
+
+    it("reads policy and rotation only for teams with rows or the viewer, and schedules only for the viewer's", async () => {
+      myTeams(["team_mine"]);
+      service.listTeams.mockResolvedValue({
+        data: [team, otherTeam("team_idle"), otherTeam("team_mine")],
+      } as any);
+      service.listResponses.mockResolvedValue({ data: [page()] } as any);
+      render();
+      await flushPromises();
+
+      expect(teamCalls(service.getPolicy)).toEqual(["team_1", "team_mine"]);
+      expect(teamCalls(service.whoIsOnCall)).toEqual(["team_1", "team_mine"]);
+      expect(teamCalls(service.getSchedule)).toEqual(["team_mine"]);
+    });
+
+    it("starts the team reads as soon as the rows land, without waiting for the teams list", async () => {
+      service.listTeams.mockReturnValue(new Promise(() => {}) as any);
+      service.listResponses.mockResolvedValue({ data: [page()] } as any);
+      render();
+      await flushPromises();
+
+      expect(teamCalls(service.getPolicy)).toEqual(["team_1"]);
+    });
+
+    it("reads the teams of rows a filter brings in", async () => {
+      const wrapper = await withPages([page()]);
+      service.listResponses.mockResolvedValue({
+        data: [page({ id: "n", team_id: "team_new" }, "al_new")],
+      } as any);
+
+      wrapper
+        .findAllComponents({ name: "OSelect" })
+        .find((node) => node.attributes("data-test") === "oncall-responses-team-filter")!
+        .vm.$emit("update:modelValue", "team_new");
+      await flushPromises();
+
+      expect(teamCalls(service.getPolicy)).toContain("team_new");
+    });
+
+    it("keeps the newer team read when an older one answers last", async () => {
+      let answerOld!: (value: unknown) => void;
+      service.whoIsOnCall.mockImplementation((({ team_id }: { team_id: string }) =>
+        team_id === "team_1"
+          ? new Promise((resolve) => (answerOld = resolve))
+          : Promise.resolve({
+              data: [
+                {
+                  rotation_id: "r",
+                  rotation_name: "Primary",
+                  rule: "Base",
+                  user_email: "new@o2.ai",
+                },
+              ],
+            })) as any);
+      const wrapper = await withPages([page()]);
+      service.listResponses.mockResolvedValue({
+        data: [page({ id: "n", team_id: "team_new" }, "al_new")],
+      } as any);
+      wrapper
+        .findAllComponents({ name: "OSelect" })
+        .find((node) => node.attributes("data-test") === "oncall-responses-team-filter")!
+        .vm.$emit("update:modelValue", "team_new");
+      await flushPromises();
+
+      answerOld({
+        data: [
+          { rotation_id: "r", rotation_name: "Primary", rule: "Base", user_email: "old@o2.ai" },
+        ],
+      });
+      await flushPromises();
+
+      const shown = wrapper.findAllComponents({ name: "OUserCell" }).map((c) => c.props("value"));
+      expect(shown).toEqual(["new@o2.ai"]);
     });
   });
 
