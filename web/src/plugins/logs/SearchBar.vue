@@ -145,7 +145,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
               </template>
               <span v-if="!toolbarToggleIconOnly">{{ t("search.showPatternsLabel") }}</span>
               <template v-if="!patternsAccess.allowed" #icon-right>
-                <OIcon name="lock" size="xs" class="text-warning-600 shrink-0" />
+                <OIcon name="lock" size="xs" class="lock-chip shrink-0" />
               </template>
             </OToggleGroupItem>
           </OToggleGroup>
@@ -722,7 +722,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
               <OIcon
                 name="lock"
                 size="xs"
-                class="text-warning-600"
+                class="lock-chip"
                 data-test="search-scheduler-locked-icon"
               />
             </template>
@@ -901,9 +901,37 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
         <div class="search-time order-2">
           <div class="flex">
+            <OTooltip
+              v-if="
+                config.isEnterprise == 'true' &&
+                store.state.zoConfig.super_cluster_enabled &&
+                superClusterLocked
+              "
+              :content="superClusterLockedReason"
+            >
+              <span class="me-1 inline-flex">
+                <OButton
+                  variant="outline"
+                  size="sm"
+                  class="region-dropdown-btn px-1"
+                  disabled
+                  data-test="logs-search-bar-region-btn"
+                >
+                  <template #icon-left>
+                    <OIcon
+                      name="lock"
+                      class="lock-chip"
+                      size="sm"
+                      data-test="logs-search-bar-region-lock"
+                    />
+                  </template>
+                  {{ t("search.region") }}
+                </OButton>
+              </span>
+            </OTooltip>
             <OButtonGroup
               class="border-card-glass-border me-1 border p-0"
-              v-if="
+              v-else-if="
                 config.isEnterprise == 'true' &&
                 Object.keys(store.state.regionInfo).length > 0 &&
                 store.state.zoConfig.super_cluster_enabled
@@ -1814,6 +1842,7 @@ import ODropdownSeparator from "@/lib/overlay/Dropdown/ODropdownSeparator.vue";
 import ODropdownGroup from "@/lib/overlay/Dropdown/ODropdownGroup.vue";
 import { hasFieldCondition, removeFieldCondition } from "@/plugins/logs/filterUtils";
 import OTooltip from "@/lib/overlay/Tooltip/OTooltip.vue";
+import { useLicenseLock } from "@/composables/useFeatureLock";
 import OInput from "@/lib/forms/Input/OInput.vue";
 import OSelect from "@/lib/forms/Select/OSelect.vue";
 import OSwitch from "@/lib/forms/Switch/OSwitch.vue";
@@ -2063,6 +2092,8 @@ export default defineComponent({
     const { isDark } = useTheme();
     const { showErrorNotification } = useNotifications();
     const regionFilter = ref();
+    const { locked: superClusterLocked, lockedReason: superClusterLockedReason } =
+      useLicenseLock("super_cluster");
     const regionFilterRef = ref(null);
     const { resetStreamData, searchObj } = searchState();
     const { buildPatternsAlertPrefill } = usePatternActions();
@@ -5178,6 +5209,8 @@ export default defineComponent({
       regionFilterMethod,
       regionFilterRef,
       regionFilter,
+      superClusterLocked,
+      superClusterLockedReason,
       resetRegionFilter,
       cancelQuery,
       onLogsVisualizeToggleUpdate,

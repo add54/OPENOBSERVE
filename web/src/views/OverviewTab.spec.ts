@@ -263,6 +263,21 @@ describe("OverviewTab", () => {
     vi.clearAllMocks();
   });
 
+  describe("alerts entry point under a license lock", () => {
+    it("locks the alerts card while alerts is locked", async () => {
+      store.commit("setConfig", { ...store.state.zoConfig, features: { alerts: "locked" } });
+      const push = vi.spyOn(router, "push");
+      wrapper = mountOverviewTab();
+      await flushPromises();
+
+      const card = wrapper.find('[data-test="overview-empty-alerts-card"]');
+      expect(card.attributes("aria-disabled")).toBe("true");
+      await card.trigger("click");
+      expect(push).not.toHaveBeenCalled();
+      push.mockRestore();
+    });
+  });
+
   describe("loaded with no data", () => {
     beforeEach(async () => {
       wrapper = mountOverviewTab();
@@ -633,6 +648,60 @@ describe("OverviewTab", () => {
 
       expect(incidentsService.list).not.toHaveBeenCalled();
       expect(serviceGraphService.getCurrentTopology).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("license-locked incidents and anomaly sections", () => {
+    it("renders the locked cards with the reason and no upgrade dialog", async () => {
+      config.isEnterprise = "true";
+      store.commit("setConfig", {
+        ...store.state.zoConfig,
+        incidents_enabled: false,
+        anomaly_detection_enabled: false,
+        features: { incidents: "locked", anomaly_detection: "locked" },
+      });
+      wrapper = mountOverviewTab();
+      await flushPromises();
+
+      const incidents = wrapper.find('[data-test="overview-incidents-locked"]');
+      const anomalies = wrapper.find('[data-test="overview-anomalies-locked"]');
+      expect(incidents.exists()).toBe(true);
+      expect(anomalies.exists()).toBe(true);
+      expect(incidents.text()).not.toContain(i18n.global.t("enterpriseFeature.pitch.incidents"));
+      expect(incidents.text()).toContain("Locked: needs");
+    });
+  });
+
+  describe("license-locked alerts and anomaly detection", () => {
+    const lockFeatures = (features: Record<string, string>) =>
+      store.commit("setConfig", {
+        ...store.state.zoConfig,
+        anomaly_detection_enabled: true,
+        features,
+      });
+
+    it("should request neither alert history nor anomalies when both are locked", async () => {
+      lockFeatures({ alerts: "locked", anomaly_detection: "locked" });
+      givenRecentEvents();
+      wrapper = mountOverviewTab();
+      await flushPromises();
+
+      expect(alertsService.getHistory).not.toHaveBeenCalled();
+      expect(anomalyService.list).not.toHaveBeenCalled();
+      expect(anomalyService.getAllHistory).not.toHaveBeenCalled();
+      expect(wrapper.find(RECENT_EVENTS).exists()).toBe(false);
+      expect(wrapper.find('[data-test="overview-load-error-empty-state"]').exists()).toBe(false);
+    });
+
+    it("should load alert history and anomalies when both are enabled", async () => {
+      lockFeatures({ alerts: "enabled", anomaly_detection: "enabled" });
+      givenRecentEvents();
+      wrapper = mountOverviewTab();
+      await flushPromises();
+
+      expect(alertsService.getHistory).toHaveBeenCalled();
+      expect(anomalyService.list).toHaveBeenCalled();
+      expect(wrapper.find(RECENT_EVENTS).exists()).toBe(true);
     });
   });
 

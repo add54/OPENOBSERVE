@@ -303,6 +303,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
         :series-role="contextMenuData?.seriesRole"
         :unit="panelSchema?.config?.unit"
         :unit-custom="panelSchema?.config?.unit_custom"
+        :locked="alertsLocked"
+        :locked-reason="alertsLockedReason"
         @select="handleCreateAlert"
         @close="hideContextMenu"
       />
@@ -350,6 +352,7 @@ import {
 } from "vue";
 import { useStore } from "vuex";
 import { useTheme } from "@/composables/useTheme";
+import { useLicenseLock } from "@/composables/useFeatureLock";
 import { chartColor } from "@/utils/chartTheme";
 import { raw, useI18nTyped } from "@/types/i18n";
 import { usePanelTitle } from "@/composables/dashboard/usePanelTitle";
@@ -1328,6 +1331,7 @@ export default defineComponent({
 
     // Context menu state for alert creation (shared with usePanelAlertCreation)
     const contextMenuData = ref<any>(null);
+    const { locked: alertsLocked, lockedReason: alertsLockedReason } = useLicenseLock("alerts");
 
     const {
       contextMenuVisible,
@@ -2655,6 +2659,8 @@ export default defineComponent({
       drilldownArray,
       selectedAnnotationData,
       openDrilldown,
+      alertsLocked,
+      alertsLockedReason,
       drilldownPopUpRef,
       annotationPopupRef,
       hidePopupsAndOverlays,

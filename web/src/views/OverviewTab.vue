@@ -130,7 +130,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
     <!-- Locked: no license to unlock Incidents, shown instead of omitted so
          the capability is discoverable from a build that can't enable it. -->
     <section
-      v-else-if="!incidentsAccess.allowed"
+      v-else-if="!incidentsAccess.allowed || incidentsLicenseLocked"
       class="mb-5"
       data-test="overview-incidents-locked"
     >
@@ -140,11 +140,14 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
         </div>
       </div>
       <div
-        class="border-border-default bg-surface-subtle rounded-default flex cursor-pointer items-center gap-3 border border-[0.0625em] px-4 py-5"
-        @click="openUpgradeDialog"
+        class="border-border-default bg-surface-subtle rounded-default flex items-center gap-3 border border-[0.0625em] px-4 py-5"
+        :class="{ 'cursor-pointer': !incidentsLicenseLocked }"
+        @click="!incidentsLicenseLocked && openUpgradeDialog()"
       >
-        <OIcon name="lock" size="md" class="text-warning-600 shrink-0" />
-        <span class="text-text-secondary text-sm">{{ incidentsAccess.message }}</span>
+        <OIcon name="lock" size="md" class="lock-chip shrink-0" />
+        <span class="text-text-secondary text-sm">{{
+          incidentsLicenseLocked ? incidentsLockedReason : incidentsAccess.message
+        }}</span>
       </div>
     </section>
 
@@ -322,7 +325,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
         class="border-border-default bg-surface-subtle rounded-default flex cursor-pointer items-center gap-3 border border-[0.0625em] px-4 py-5"
         @click="openUpgradeDialog"
       >
-        <OIcon name="lock" size="md" class="text-warning-600 shrink-0" />
+        <OIcon name="lock" size="md" class="lock-chip shrink-0" />
         <span class="text-text-secondary text-sm">{{ incidentsAccess.message }}</span>
       </div>
     </section>
@@ -401,6 +404,19 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
       :title="t('overview.activeAnomalies')"
       @retry="() => loadAll(true)"
     />
+    <section v-else-if="anomalyLocked" class="mb-5" data-test="overview-anomalies-locked">
+      <div class="mb-2 flex items-center justify-between ps-1">
+        <div class="text-text-heading text-sm font-medium tracking-[0.01em]">
+          {{ t("overview.activeAnomalies") }}
+        </div>
+      </div>
+      <div
+        class="border-border-default bg-surface-subtle rounded-default flex items-center gap-3 border border-[0.0625em] px-4 py-5"
+      >
+        <OIcon name="lock" size="md" class="lock-chip shrink-0" />
+        <span class="text-text-secondary text-sm">{{ anomalyLock.lockedReason.value }}</span>
+      </div>
+    </section>
 
     <!-- RECENT EVENTS (alert firing feed) -->
     <section v-if="recentEvents.length > 0" class="mb-5" data-test="overview-recent-events-section">
@@ -483,14 +499,20 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
       <template #title>{{ t("overview.notMonitoredTitle") }}</template>
       <template #description>{{ t("overview.notMonitoredDesc") }}</template>
       <template #actions>
-        <EmptyStateActionCard
+        <OTooltip
           v-if="showAlertsCard"
-          icon="notifications"
-          :label="t('overview.notMonitoredAlert')"
-          :sublabel="t('overview.notMonitoredAlertDesc')"
-          data-test="overview-not-monitored-alert-card"
-          @click="goToAddAlert"
-        />
+          :content="alertsLock.lockedReason.value"
+          :disabled="!alertsLocked"
+        >
+          <EmptyStateActionCard
+            :icon="alertsLocked ? 'lock' : 'notifications'"
+            :label="t('overview.notMonitoredAlert')"
+            :sublabel="t('overview.notMonitoredAlertDesc')"
+            :unavailable="alertsLocked"
+            data-test="overview-not-monitored-alert-card"
+            @click="goToAddAlert"
+          />
+        </OTooltip>
         <EmptyStateActionCard
           v-if="showAlertsCard && anomalyEnabled"
           icon="auto-awesome"
@@ -525,33 +547,20 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
         flagOn ? t("overview.allClearDescScoped") : t("overview.allClearDesc")
       }}</template>
       <template #actions>
-        <!-- View alerts -->
-        <button
+        <OTooltip
           v-if="showAlertsCard"
-          type="button"
-          class="group rounded-default border-border-default bg-surface-base hover:border-accent hover:bg-tabs-hover-bg focus-visible:ring-accent/40 relative flex min-h-16 max-w-72 min-w-0 flex-1 basis-56 cursor-pointer items-center gap-3 border py-2.5 ps-3 pe-3.5 text-left transition-[color,background-color,border-color,box-shadow] duration-150 outline-none hover:shadow-md focus-visible:ring-2"
-          data-test="overview-empty-alerts-card"
-          @click="goToAlertList"
+          :content="alertsLock.lockedReason.value"
+          :disabled="!alertsLocked"
         >
-          <span
-            class="rounded-default bg-icon-chip-warning-bg text-icon-chip-warning-text group-hover:bg-accent group-hover:text-text-inverse inline-flex h-10 w-10 shrink-0 items-center justify-center transition-[background-color,color] duration-150"
-          >
-            <OIcon name="notifications" size="md" />
-          </span>
-          <span class="flex min-w-0 flex-1 flex-col gap-0.5">
-            <OTruncatedText class="text-text-heading text-(length:--text-sm) font-semibold">{{
-              t("overview.emptyActionAlerts")
-            }}</OTruncatedText>
-            <span class="text-text-secondary text-(length:--text-xs) leading-[1.4]">{{
-              t("overview.emptyActionAlertsDesc")
-            }}</span>
-          </span>
-          <OIcon
-            name="chevron-right"
-            size="sm"
-            class="text-text-disabled group-hover:text-accent shrink-0 transition-[transform,color] duration-150 group-hover:translate-x-0.5"
+          <EmptyStateActionCard
+            :icon="alertsLocked ? 'lock' : 'notifications'"
+            :label="t('overview.emptyActionAlerts')"
+            :sublabel="t('overview.emptyActionAlertsDesc')"
+            :unavailable="alertsLocked"
+            data-test="overview-empty-alerts-card"
+            @click="goToAlertList"
           />
-        </button>
+        </OTooltip>
         <!-- Explore logs -->
         <button
           v-if="showLogsCard"
@@ -644,6 +653,7 @@ import ORefreshButton from "@/lib/core/RefreshButton/ORefreshButton.vue";
 import OButton from "@/lib/core/Button/OButton.vue";
 import OIcon from "@/lib/core/Icon/OIcon.vue";
 import OTruncatedText from "@/lib/core/Typography/OTruncatedText.vue";
+import OTooltip from "@/lib/overlay/Tooltip/OTooltip.vue";
 import OverviewSkeleton from "./OverviewSkeleton.vue";
 import OEmptyState from "@/lib/core/EmptyState/OEmptyState.vue";
 import EmptyStateActionCard from "@/lib/core/EmptyState/EmptyStateActionCard.vue";
@@ -655,6 +665,7 @@ import ServiceGraphNodeSidePanel from "@/plugins/traces/ServiceGraphNodeSidePane
 import { sqlEquals } from "@/utils/query/sqlFilterBuilder";
 import { useLockedAffordance } from "@/composables/useLockedAffordance";
 import { useEnterpriseUpgradeDialog } from "@/composables/useEnterpriseUpgradeDialog";
+import { useLicenseLock } from "@/composables/useFeatureLock";
 
 const AlertHistoryDrawer = defineAsyncComponent(
   () => import("@/components/alerts/AlertHistoryDrawer.vue"),
@@ -674,7 +685,18 @@ const isIncidentsEnabled = computed(
 );
 const flagOn = computed(() => store.state.zoConfig?.restricted_routes_on_empty_data === true);
 // a deployment with anomaly detection off answers 403 by design, which is no load failure
-const anomalyEnabled = computed(() => store.state.zoConfig?.anomaly_detection_enabled === true);
+const alertsLock = useLicenseLock("alerts");
+const alertsLocked = alertsLock.locked;
+const { locked: incidentsFeatureLocked, lockedReason: incidentsLockedReason } =
+  useLicenseLock("incidents");
+const incidentsLicenseLocked = computed(
+  () => incidentsAccess.value.allowed && incidentsFeatureLocked.value,
+);
+const anomalyLock = useLicenseLock("anomaly_detection");
+const anomalyLocked = anomalyLock.locked;
+const anomalyEnabled = computed(
+  () => store.state.zoConfig?.anomaly_detection_enabled === true && !anomalyLocked.value,
+);
 
 // ── Date / time picker ───────────────────────────────────────────────────────
 const LS_TIME_KEY = "o2_overview_time";
@@ -795,7 +817,8 @@ const isForbidden = (err: unknown) => {
   return e?.status === 403 || e?.response?.status === 403;
 };
 const attemptedSections = computed<SectionKey[]>(() => {
-  const keys: SectionKey[] = ["recentEvents"];
+  const keys: SectionKey[] = [];
+  if (!alertsLocked.value) keys.push("recentEvents");
   if (anomalyEnabled.value) keys.push("anomalies");
   if (isIncidentsEnabled.value) keys.push("incidents");
   if (incidentsAccess.value.allowed) keys.push("services");
@@ -803,7 +826,9 @@ const attemptedSections = computed<SectionKey[]>(() => {
 });
 const isFailed = (key: SectionKey) =>
   !!sectionFailure[key] && attemptedSections.value.includes(key);
-const allFailed = computed(() => attemptedSections.value.every(isFailed));
+const allFailed = computed(
+  () => attemptedSections.value.length > 0 && attemptedSections.value.every(isFailed),
+);
 
 type PageState =
   "content" | "partial" | "forbidden" | "error" | "not-monitored" | "no-data" | "all-clear";
@@ -961,6 +986,11 @@ const loadUserStreams = async (force = false) => {
 // Dedicated anomaly loader — uses anomaly_detection service for reliable results
 const loadAnomalies = async (force = false) => {
   sectionFailure.anomalies = null;
+  if (anomalyLocked.value) {
+    anomalies.value = [];
+    anomalyConfigCount.value = null;
+    return;
+  }
   try {
     const org = orgId.value;
     const { startTime, endTime } = timeRange.value;
@@ -1066,6 +1096,10 @@ const loadAnomalies = async (force = false) => {
 // Alert trigger history feeds recentEvents only
 const loadHistoryAndSplit = async (force = false) => {
   sectionFailure.recentEvents = null;
+  if (alertsLocked.value) {
+    recentEvents.value = [];
+    return;
+  }
   try {
     // Exact bounds: `alertHistoryQuery` rounds only its key, so the newest minutes still reach the server.
     const historyOptions = alertHistoryQuery(orgId.value, {
