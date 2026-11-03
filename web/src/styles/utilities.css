@@ -121,6 +121,12 @@
   );
 }
 
+/* Dotted canvas behind a pannable node graph. Consumer: components/query-plan/ProfileCanvas.vue. */
+@utility bg-dot-grid {
+  background-image: radial-gradient(var(--color-border-strong) 0.0625rem, transparent 0.0625rem);
+  background-size: 1.125rem 1.125rem;
+}
+
 /* Green-to-red scale for the click heat legend; hues mirror the canvas palette in utils/rum/clickHeatmap.ts. */
 @utility bg-heat-legend {
   background-image: linear-gradient(
