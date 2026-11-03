@@ -544,9 +544,9 @@ fn execution_failure_text(
 }
 
 /// `text` cut to `MAX_TOOL_RESULT_BYTES` at a character boundary, marked when it was longer.
-fn clipped(text: &str) -> String {
+fn clipped(text: String) -> String {
     if text.len() <= MAX_TOOL_RESULT_BYTES {
-        return text.to_string();
+        return text;
     }
     let mut end = MAX_TOOL_RESULT_BYTES;
     // Index 0 is always a character boundary, so this stops before `end` underflows.
@@ -600,7 +600,7 @@ async fn execute_tool(
         return error_result(format!(
             "Error {}: {}",
             http_response.status_code,
-            clipped(&http_response.body)
+            clipped(http_response.body)
         ));
     }
 
@@ -1401,10 +1401,10 @@ mod tests {
 
     #[test]
     fn clipping_cuts_at_a_character_boundary() {
-        assert_eq!(clipped("short"), "short");
+        assert_eq!(clipped("short".to_string()), "short");
 
         // 3-byte characters: the limit falls inside one, so the cut must move back.
-        let clipped_text = clipped(&"€".repeat(MAX_TOOL_RESULT_BYTES));
+        let clipped_text = clipped("€".repeat(MAX_TOOL_RESULT_BYTES));
         let kept = clipped_text.strip_suffix("… [truncated]").unwrap();
         assert!(kept.len() <= MAX_TOOL_RESULT_BYTES);
         assert!(kept.chars().all(|c| c == '€'));
