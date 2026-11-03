@@ -40,6 +40,18 @@ use super::{
     types::{MCPTool, SummaryFieldsConfig},
 };
 
+/// Extension key for MCP configuration
+const MCP_EXTENSION_KEY: &str = "x-o2-mcp";
+
+/// Analyzer of tool names: CamelCase split, lowercased, stemmed.
+const NAME_ANALYZER: &str = "o2_stem";
+
+/// Tantivy's built-in analyzer for descriptions and categories: lowercased, stemmed.
+const TEXT_ANALYZER: &str = "en_stem";
+
+/// Maximum allowed query length to prevent DoS via pathological inputs
+const MAX_SEARCH_QUERY_LEN: usize = 500;
+
 /// MCP extension configuration from x-o2-mcp OpenAPI extension
 ///
 /// Example usage in utoipa::path:
@@ -77,18 +89,6 @@ pub struct McpExtension {
 fn default_enabled() -> bool {
     true
 }
-
-/// Extension key for MCP configuration
-const MCP_EXTENSION_KEY: &str = "x-o2-mcp";
-
-/// Analyzer of tool names: CamelCase split, lowercased, stemmed.
-const NAME_ANALYZER: &str = "o2_stem";
-
-/// Tantivy's built-in analyzer for descriptions and categories: lowercased, stemmed.
-const TEXT_ANALYZER: &str = "en_stem";
-
-/// Maximum allowed query length to prevent DoS via pathological inputs
-const MAX_SEARCH_QUERY_LEN: usize = 500;
 
 /// Build the schema exposed to MCP clients from the schema retained for HTTP execution.
 fn public_tool_schema(http_path: &str, mut execution_schema: Value) -> Value {
