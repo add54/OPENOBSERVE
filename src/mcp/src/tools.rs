@@ -20,7 +20,7 @@ use std::{
 };
 
 use anyhow::{Ok, Result};
-use config::tantivy::tokenizer::{CollectType, O2_TOKENIZER, o2_tokenizer_build};
+use config::tantivy::tokenizer::{CollectType, O2Tokenizer};
 use serde::Deserialize;
 use serde_json::Value;
 use tantivy::{
@@ -28,8 +28,9 @@ use tantivy::{
     collector::TopDocs,
     query::QueryParser,
     schema::{
-        Field, IndexRecordOption, STORED, Schema, TEXT, TextFieldIndexing, TextOptions, Value as _,
+        Field, IndexRecordOption, STORED, Schema, TextFieldIndexing, TextOptions, Value as _,
     },
+    tokenizer::{Language, LowerCaser, Stemmer, TextAnalyzer},
 };
 use tokio::sync::OnceCell;
 use utoipa::openapi::OpenApi;
@@ -79,6 +80,12 @@ fn default_enabled() -> bool {
 
 /// Extension key for MCP configuration
 const MCP_EXTENSION_KEY: &str = "x-o2-mcp";
+
+/// Analyzer of tool names: CamelCase split, lowercased, stemmed.
+const NAME_ANALYZER: &str = "o2_stem";
+
+/// Tantivy's built-in analyzer for descriptions and categories: lowercased, stemmed.
+const TEXT_ANALYZER: &str = "en_stem";
 
 /// Build the schema exposed to MCP clients from the schema retained for HTTP execution.
 fn public_tool_schema(http_path: &str, mut execution_schema: Value) -> Value {
@@ -180,29 +187,38 @@ struct ToolSearchIndex {
     tools_by_name: HashMap<String, Arc<MCPTool>>,
 }
 
+fn name_analyzer(collect_type: CollectType) -> TextAnalyzer {
+    TextAnalyzer::builder(O2Tokenizer::new(collect_type))
+        .filter(LowerCaser)
+        .filter(Stemmer::new(Language::English))
+        .build()
+}
+
 /// Build a tantivy index over `tools`, independent of the process-wide index.
 fn build_index(tools: &[Arc<MCPTool>]) -> Result<ToolSearchIndex> {
     // Use the O2 tokenizer for the name field to handle CamelCase splitting
     // (e.g., "CreateDashboard" → "create", "dashboard"; "HTTPClient" → "http", "client")
-    let o2_text_opts = TextOptions::default().set_indexing_options(
-        TextFieldIndexing::default()
-            .set_index_option(IndexRecordOption::WithFreqsAndPositions)
-            .set_tokenizer(O2_TOKENIZER),
-    );
+    let analyzed = |analyzer: &str| {
+        TextOptions::default().set_indexing_options(
+            TextFieldIndexing::default()
+                .set_index_option(IndexRecordOption::WithFreqsAndPositions)
+                .set_tokenizer(analyzer),
+        )
+    };
 
     let mut schema_builder = Schema::builder();
-    let name_field = schema_builder.add_text_field("name", o2_text_opts);
-    let description_field = schema_builder.add_text_field("description", TEXT);
-    let category_field = schema_builder.add_text_field("category", TEXT);
+    let name_field = schema_builder.add_text_field("name", analyzed(NAME_ANALYZER));
+    let description_field = schema_builder.add_text_field("description", analyzed(TEXT_ANALYZER));
+    let category_field = schema_builder.add_text_field("category", analyzed(TEXT_ANALYZER));
     let tool_name_field = schema_builder.add_text_field("tool_name", STORED);
     let schema = schema_builder.build();
 
     let index = Index::create_in_ram(schema);
 
-    // Register the O2 tokenizer for indexing (Ingest mode emits root + split tokens)
+    // Register the name analyzer for indexing (Ingest mode emits root + split tokens)
     index
         .tokenizers()
-        .register(O2_TOKENIZER, o2_tokenizer_build(CollectType::Ingest));
+        .register(NAME_ANALYZER, name_analyzer(CollectType::Ingest));
 
     let mut writer: IndexWriter = index.writer(15_000_000)?;
 
@@ -222,11 +238,10 @@ fn build_index(tools: &[Arc<MCPTool>]) -> Result<ToolSearchIndex> {
     }
     writer.commit()?;
 
-    // Re-register with Search mode for query-time tokenization
-    // (Search mode emits only split tokens, no root token)
+    // Query-time mode keeps a CamelCase word whole, so it matches the root token only
     index
         .tokenizers()
-        .register(O2_TOKENIZER, o2_tokenizer_build(CollectType::Search));
+        .register(NAME_ANALYZER, name_analyzer(CollectType::Search));
 
     // Create a long-lived reader (avoids per-query reader creation)
     let reader = index
@@ -791,6 +806,33 @@ mod tests {
     #[test]
     fn the_limit_caps_the_results() {
         assert_eq!(found(&widget_index(), "widgets", 1).len(), 1);
+    }
+
+    #[test]
+    fn a_singular_query_finds_plural_descriptions_and_categories() {
+        // The name has no word to match, so only the description and category can.
+        let index = build_index(&[tool("Op1", "List all widgets", "widgets")]).unwrap();
+        assert_eq!(found(&index, "widget", 3), ["Op1"]);
+    }
+
+    #[test]
+    fn a_singular_query_finds_plural_names() {
+        let index = build_index(&[tool("ListWidgets", "", "")]).unwrap();
+        assert_eq!(found(&index, "widget", 3), ["ListWidgets"]);
+    }
+
+    #[test]
+    fn a_plural_query_finds_singular_words() {
+        let index = build_index(&[tool("GetGizmo", "Get a gizmo", "gizmo")]).unwrap();
+        assert_eq!(found(&index, "gizmos", 3), ["GetGizmo"]);
+    }
+
+    #[test]
+    fn verb_forms_find_the_same_tool() {
+        let index = widget_index();
+        for query in ["creating widgets", "created widget", "creates"] {
+            assert_eq!(found(&index, query, 3)[0], "CreateWidget", "{query}");
+        }
     }
 
     #[test]
