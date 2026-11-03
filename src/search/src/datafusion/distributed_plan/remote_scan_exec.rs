@@ -42,10 +42,7 @@ use opentelemetry::context::FutureExt as _;
 use parking_lot::Mutex;
 use rand::prelude::SliceRandom;
 
-use super::{
-    node::RemoteScanNode,
-    profile::{NodeProfileRecorder, NodeProfiles},
-};
+use super::node::RemoteScanNode;
 use crate::datafusion::{
     distributed_plan::{
         codec::get_physical_extension_codec,
@@ -69,7 +66,6 @@ pub struct RemoteScanExec {
     pub cluster_metrics: Arc<Mutex<Vec<Metrics>>>,
     pub enrich_mode_node_idx: usize,
     pub metrics: ExecutionPlanMetricsSet,
-    pub node_profiles: NodeProfiles,
 }
 
 impl RemoteScanExec {
@@ -111,7 +107,6 @@ impl RemoteScanExec {
             peak_memory: Arc::new(AtomicUsize::new(0)),
             enrich_mode_node_idx,
             metrics: ExecutionPlanMetricsSet::new(),
-            node_profiles: NodeProfiles::default(),
         })
     }
 
@@ -158,11 +153,6 @@ impl RemoteScanExec {
 
     pub fn with_metrics(mut self, metrics: ExecutionPlanMetricsSet) -> Self {
         self.metrics = metrics;
-        self
-    }
-
-    pub fn with_node_profiles(mut self, node_profiles: NodeProfiles) -> Self {
-        self.node_profiles = node_profiles;
         self
     }
 
@@ -268,8 +258,7 @@ impl ExecutionPlan for RemoteScanExec {
             .with_partial_err(self.partial_err.clone())
             .with_cluster_metrics(self.cluster_metrics.clone())
             .with_peak_memory(self.peak_memory.clone())
-            .with_metrics(self.metrics.clone())
-            .with_node_profiles(self.node_profiles.clone());
+            .with_metrics(self.metrics.clone());
         Ok(Arc::new(remote_scan))
     }
 
@@ -289,7 +278,6 @@ impl ExecutionPlan for RemoteScanExec {
             self.cluster_metrics(),
             self.peak_memory(),
             baseline_metrics,
-            self.node_profiles.clone(),
         );
         let stream = futures::stream::once(fut).try_flatten();
         Ok(Box::pin(RecordBatchStreamAdapter::new(
@@ -314,7 +302,6 @@ async fn get_remote_batch(
     cluster_metrics: Arc<Mutex<Vec<Metrics>>>,
     peak_memory: Arc<AtomicUsize>,
     metrics: RemoteScanMetrics,
-    node_profiles: NodeProfiles,
 ) -> Result<SendableRecordBatchStream> {
     let start = std::time::Instant::now();
     let cfg = config::get_config();
@@ -348,20 +335,6 @@ async fn get_remote_batch(
         }
     }
 
-    let recorder = remote_scan_node.search_infos.is_analyze.then(|| {
-        let files = remote_scan_node
-            .search_infos
-            .file_id_list
-            .get(partition)
-            .map_or(0, Vec::len);
-        NodeProfileRecorder::start(node_profiles, partition, node.as_ref(), files)
-    });
-    let skip = |err: Option<&str>| {
-        if let Some(r) = &recorder {
-            r.finish_skipped(err);
-        }
-    };
-
     let empty_stream = EmptyStream::new(
         &trace_id,
         schema.clone(),
@@ -378,7 +351,6 @@ async fn get_remote_batch(
         && !enrich_mode
         && remote_scan_node.is_file_list_empty(partition)
     {
-        skip(None);
         return Ok(get_empty_stream(empty_stream));
     }
 
@@ -406,7 +378,6 @@ async fn get_remote_batch(
     {
         Ok((client, request)) => (client, request),
         Err(e) => {
-            skip(Some(e.message()));
             return Ok(get_empty_stream(empty_stream.with_error(e)));
         }
     };
@@ -419,7 +390,6 @@ async fn get_remote_batch(
     let stream = match client.do_get(request).with_context(context.clone()).await {
         Ok(stream) => stream,
         Err(e) => {
-            skip(Some(e.message()));
             if e.code() == tonic::Code::Cancelled || e.code() == tonic::Code::DeadlineExceeded || is_parquet_file_not_found(&e) {
                 return Ok(get_empty_stream(empty_stream.with_error(e)));
             }
@@ -444,8 +414,7 @@ async fn get_remote_batch(
         .with_partial_err(partial_err.clone())
         .with_cluster_metrics(cluster_metrics)
         .with_peak_memory(peak_memory)
-        .with_start_time(start)
-        .with_node_profile(recorder);
+        .with_start_time(start);
 
     let mut stream = FlightDecoderStream::new(stream, schema.clone(), metrics, query_context);
     let stream = async_stream::stream! {
