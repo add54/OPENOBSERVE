@@ -944,6 +944,7 @@ import {
   addResponseNoteMutation,
   coverageGapsQuery,
   handoffResponseMutation,
+  myOnCallQuery,
   oncallTeamsQuery,
   ownershipRulesQuery,
   pagedResponsesQuery,
@@ -965,12 +966,13 @@ import { toast } from "@/lib/feedback/Toast/useToast";
 import analytics from "@/services/product_analytics";
 import { useShortcuts } from "@/lib/vue-shortcut-manager";
 import { destinationsQuery } from "@/services/alert_destination.queries";
-import type { IncidentWithAlerts } from "@/services/incidents";
-import { incidentQuery } from "@/services/incidents.queries";
+import type { IncidentWithAlerts, ListIncidentsResponse } from "@/services/incidents";
+import { incidentQuery, incidentsQuery } from "@/services/incidents.queries";
 import type {
   Channel,
   CoverageGaps,
   EscalationProgress,
+  MyOnCall,
   OnCallPolicy,
   OnCallResponse,
   OnCallResponseEvent,
@@ -1020,6 +1022,7 @@ type PageRow = OnCallResponseGroup & { rowKey: string };
  * that would read as "nothing has fired".
  */
 const ESCALATION_DETAIL_LIMIT = 25;
+const INCIDENT_LIST_LIMIT = 200;
 
 /**
  * The states a reader triages by, in the order they matter.
@@ -1153,10 +1156,7 @@ const teamNameById = computed<Record<string, string>>(() =>
 const teamIsDeleted = (teamId: string | null) =>
   isDeletedTeam(teamId, teamsLoaded.value ? teams.value.map((team) => team.id) : null);
 
-// A ksuid asks the reader to look it up somewhere else, same as team_id
-// (`fetchTeamContext` below). There is no bulk "get these incidents" endpoint,
-// so this fills in one id at a time and the chip falls back to the raw id
-// until its title lands.
+// The chip falls back to the raw id until its title lands (`fetchIncidentTitles`).
 const incidentTitleById = ref<Record<string, string>>({});
 
 const teamOptions = computed(() => [
@@ -1887,6 +1887,7 @@ async function fetchResponses(opts: { background?: boolean; force?: boolean } = 
     // Fire-and-forget: the list is already usable with ids as the fallback,
     // so titles fill in behind it rather than holding up the table.
     void fetchIncidentTitles(!!opts.force);
+    void fetchTeamContext(!!opts.force);
   } catch (err) {
     if (readId !== latestResponsesRead) return;
     // §G.8.1: the probe said "not here". Leaving `loaded` false keeps the
@@ -1902,30 +1903,39 @@ async function fetchResponses(opts: { background?: boolean; force?: boolean } = 
   }
 }
 
-/// One request per incident id — there is no bulk "get these incidents"
-/// endpoint (see `fetchTeamContext` for the same constraint on team data).
-/// Already-resolved ids are skipped so a background fetch doesn't re-read
-/// titles the list already has; only the reader's Refresh re-reads them all.
+/// Titles from one read of the newest incidents; only an id that read did not return costs its own request.
 async function fetchIncidentTitles(force = false) {
-  const ids = [
+  const wanted = [
     ...new Set(
       responses.value
         .map((response) => response.incident_id)
         .filter((id): id is string => !!id && (force || !(id in incidentTitleById.value))),
     ),
   ];
-  if (!ids.length) return;
+  if (!wanted.length) return;
+  const found: Record<string, string> = {};
+  const listedIds = new Set<string>();
+  const [listed] = await Promise.allSettled([
+    read<ListIncidentsResponse>(incidentsQuery(orgId.value, "", INCIDENT_LIST_LIMIT, 0), force),
+  ]);
+  if (listed.status === "fulfilled") {
+    for (const incident of listed.value?.incidents ?? []) {
+      listedIds.add(incident.id);
+      if (incident.title) found[incident.id] = incident.title;
+    }
+  }
+  const missed = wanted.filter((id) => !listedIds.has(id));
   const results = await Promise.allSettled(
-    ids.map((id) => read<IncidentWithAlerts>(incidentQuery(orgId.value, id), force)),
+    missed.map((id) => read<IncidentWithAlerts>(incidentQuery(orgId.value, id), force)),
   );
-  const next = { ...incidentTitleById.value };
-  ids.forEach((id, index) => {
+  missed.forEach((id, index) => {
     const result = results[index];
     if (result.status === "fulfilled" && result.value?.title) {
-      next[id] = result.value.title;
+      found[id] = result.value.title;
     }
   });
-  incidentTitleById.value = next;
+  // Merged after the awaits, so an overlapping read's titles are kept.
+  incidentTitleById.value = { ...incidentTitleById.value, ...found };
 }
 
 /// Teams, coverage and ownership answer the checklist, not the list. A failure
@@ -1977,42 +1987,78 @@ async function someTeamWouldPage(
   return slots.some((s) => s.status === "fulfilled" && s.value.length > 0);
 }
 
-/// Policy and rotation per team. Both are one request per team — there is no
-/// bulk endpoint for either — but team counts are small and the answers change
-/// far more slowly than the pages do.
+// The newest team read: one started for rows a filter has since replaced must not overwrite the maps.
+let latestTeamRead = 0;
+
+/// Policy and rotation for row teams and the viewer's teams, schedules for the viewer's only.
 async function fetchTeamContext(force = false) {
-  const ids = teams.value.map((team) => team.id);
-  const [policies, slots, schedules] = await Promise.all([
-    Promise.allSettled(
-      ids.map((id) => read<OnCallPolicy | null>(teamPolicyQuery(orgId.value, id), force)),
+  const readId = ++latestTeamRead;
+  const rowIds = [
+    ...new Set(responses.value.map((r) => r.team_id).filter((id): id is string => !!id)),
+  ];
+  const minePromise = Promise.allSettled([
+    read<MyOnCall | null>(myOnCallQuery(orgId.value), force),
+  ]);
+  const rowTeams = await readTeamContext(rowIds, force);
+  if (readId !== latestTeamRead) return;
+  // Only the row teams are replaced, so the viewer's other teams stay on screen until their own read lands.
+  const rows = teamContextMaps(rowTeams);
+  const otherTeams = <T,>(map: Record<string, T>) =>
+    Object.fromEntries(Object.entries(map).filter(([id]) => !rowIds.includes(id)));
+  policyByTeam.value = { ...otherTeams(policyByTeam.value), ...rows.policies };
+  positionsByTeam.value = { ...otherTeams(positionsByTeam.value), ...rows.slots };
+
+  const [mine] = await minePromise;
+  // Unreadable, no schedule is read: the banner can still show a shift, without its countdown.
+  const myIds = mine.status === "fulfilled" ? (mine.value?.teams ?? []).map((t) => t.team_id) : [];
+  const [myOnlyTeams, schedules] = await Promise.all([
+    readTeamContext(
+      myIds.filter((id) => !rowIds.includes(id)),
+      force,
     ),
     Promise.allSettled(
-      ids.map((id) => read<OnCallPosition[]>(whoIsOnCallQuery(orgId.value, id), force)),
-    ),
-    Promise.allSettled(
-      ids.map((id) => read<OnCallSchedule | null>(teamScheduleQuery(orgId.value, id), force)),
+      myIds.map((id) => read<OnCallSchedule | null>(teamScheduleQuery(orgId.value, id), force)),
     ),
   ]);
+  if (readId !== latestTeamRead) return;
 
-  const nextPolicies: Record<string, OnCallPolicy> = {};
-  const nextSlots: Record<string, OnCallPosition[]> = {};
+  const all = teamContextMaps([...rowTeams, ...myOnlyTeams]);
   const nextSchedules: Record<string, OnCallSchedule> = {};
-  ids.forEach((id, index) => {
-    const policy = policies[index];
-    if (policy.status === "fulfilled" && policy.value) nextPolicies[id] = policy.value;
-    const slot = slots[index];
-    // A team whose rotation could not be read is left OUT rather than recorded
-    // as empty: an unreadable schedule is not the same fact as a coverage gap,
-    // and the card would otherwise accuse a staffed team of having none.
-    if (slot.status === "fulfilled") nextSlots[id] = slot.value;
+  myIds.forEach((id, index) => {
     const schedule = schedules[index];
     if (schedule.status === "fulfilled" && schedule.value) {
       nextSchedules[id] = schedule.value;
     }
   });
-  policyByTeam.value = nextPolicies;
-  positionsByTeam.value = nextSlots;
+  policyByTeam.value = all.policies;
+  positionsByTeam.value = all.slots;
   scheduleByTeam.value = nextSchedules;
+}
+
+/// Each team's policy and rotation read, settled per team.
+function readTeamContext(ids: string[], force: boolean) {
+  return Promise.all(
+    ids.map(async (id) => {
+      const [policy, slot] = await Promise.allSettled([
+        read<OnCallPolicy | null>(teamPolicyQuery(orgId.value, id), force),
+        read<OnCallPosition[]>(whoIsOnCallQuery(orgId.value, id), force),
+      ]);
+      return { id, policy, slot };
+    }),
+  );
+}
+
+function teamContextMaps(results: Awaited<ReturnType<typeof readTeamContext>>) {
+  const policies: Record<string, OnCallPolicy> = {};
+  const slots: Record<string, OnCallPosition[]> = {};
+  for (const { id, policy, slot } of results) {
+    if (policy.status === "fulfilled" && policy.value) policies[id] = policy.value;
+    // A team whose rotation could not be read is left OUT rather than recorded
+    // as empty: an unreadable schedule is not the same fact as a coverage gap,
+    // and the card would otherwise accuse a staffed team of having none.
+    if (slot.status === "fulfilled") slots[id] = slot.value;
+  }
+  return { policies, slots };
 }
 
 /// Ladder position for the oldest open pages. Bounded by
@@ -2089,9 +2135,8 @@ async function loadAll(force = false) {
   // The probe answered "not here" — every further call would 404/403 the
   // same way, so stop asking.
   if (unavailable.value) return;
-  await fetchContext(force);
-  await fetchTeamContext(force);
-  await fetchEscalationProgress(force);
+  // Team reads were started by fetchResponses; the rest only need the rows.
+  await Promise.all([fetchContext(force), fetchEscalationProgress(force)]);
   // The open timeline is part of what the reader sees, so a refresh reaches it too.
   const open = expandedResponseId();
   if (open) await fetchExpandedEvents(open, force);
