@@ -254,10 +254,10 @@ async fn proxy_request(
     start: std::time::Instant,
 ) -> Response {
     let query_path = extract_path_without_query(&path);
-    let is_streaming = is_streaming_endpoint(query_path);
 
     // Extract method and headers before consuming the request
     let method = req.method().clone();
+    let is_streaming = is_streaming_request(&method, query_path);
     let headers = build_request_headers(req.headers(), is_streaming);
 
     // Read the request body once and keep it buffered so it can be re-sent on
@@ -818,8 +818,12 @@ const STREAMING_ENDPOINTS: &[&str] = &[
 
 /// Checks if the request path is for a streaming endpoint.
 fn is_streaming_endpoint(path: &str) -> bool {
-    // `GET /mcp` is an endless SSE keep-alive stream that buffering would never deliver.
-    STREAMING_ENDPOINTS.iter().any(|&ep| path.ends_with(ep)) || is_mcp_endpoint(path)
+    STREAMING_ENDPOINTS.iter().any(|&ep| path.ends_with(ep))
+}
+
+/// Whether the response must be streamed; `GET /mcp` is an endless SSE stream, its POSTs are not.
+fn is_streaming_request(method: &Method, path: &str) -> bool {
+    is_streaming_endpoint(path) || (method == Method::GET && is_mcp_endpoint(path))
 }
 
 /// Reads payload bytes with error handling.
@@ -984,11 +988,22 @@ mod tests {
         assert!(is_streaming_endpoint(
             "/api/v2/org/alerts/incidents/inc1/rca/live_stream"
         ));
-        assert!(is_streaming_endpoint("/api/org/mcp"));
-        assert!(is_streaming_endpoint("/base/api/org/mcp"));
-        assert!(!is_streaming_endpoint("/api/org/streams/mcp"));
         assert!(!is_streaming_endpoint("/api/org/_search"));
         assert!(!is_streaming_endpoint("/api/org/logs"));
+    }
+
+    #[test]
+    fn test_is_streaming_request() {
+        assert!(is_streaming_request(&Method::GET, "/api/org/mcp"));
+        assert!(is_streaming_request(&Method::GET, "/base/api/org/mcp"));
+        // MCP's POSTs and DELETE are ordinary calls; only its GET never ends
+        assert!(!is_streaming_request(&Method::POST, "/api/org/mcp"));
+        assert!(!is_streaming_request(&Method::DELETE, "/api/org/mcp"));
+        assert!(!is_streaming_request(&Method::GET, "/api/org/streams/mcp"));
+        assert!(is_streaming_request(
+            &Method::POST,
+            "/api/org/_search_stream"
+        ));
     }
 
     #[tokio::test]
