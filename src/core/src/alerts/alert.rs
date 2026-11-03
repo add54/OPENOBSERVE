@@ -131,6 +131,9 @@ pub enum AlertError {
     #[error("Alerts cannot be defined on the internal stream '{0}'")]
     ProtectedStream(String),
 
+    #[error("Invalid alert condition: {0}")]
+    InvalidCondition(String),
+
     /// The warning/critical pair is invalid for the chosen operator.
     /// "Less severe" is direction-dependent — see `level::validate_thresholds`.
     #[error("Invalid warning threshold: {0}")]
@@ -777,6 +780,21 @@ async fn prepare_alert(
     if alert.name.contains('/') {
         return Err(AlertError::AlertNameContainsForwardSlash);
     }
+    if let Some(conditions) = alert.query_condition.conditions.as_ref() {
+        conditions
+            .validate_operator_values()
+            .map_err(AlertError::InvalidCondition)?;
+    }
+    check_condition_operators(
+        old_alert.as_ref(),
+        alert,
+        get_config().common.alert_extended_condition_operators,
+    )?;
+    alert
+        .trigger_condition
+        .validate_threshold_operator()
+        .and_then(|_| alert.query_condition.validate_threshold_operators())
+        .map_err(AlertError::InvalidCondition)?;
     // A realtime alert sees every ingested row, so one on chat history would exfiltrate it.
     // Case-insensitive, so no spelling of the chat stream slips through.
     if config::meta::self_reporting::ai_chat::is_protected_ai_chat_stream(
@@ -1182,6 +1200,27 @@ fn same_schedule(a: &Alert, b: &Alert) -> bool {
         && x.cron == y.cron
         && x.silence == y.silence
         && x.tolerance_in_secs == y.tolerance_in_secs
+}
+
+/// Refuses extended operators new to this save unless `enabled`; ones `stored` used stay saveable.
+fn check_condition_operators(
+    stored: Option<&Alert>,
+    alert: &Alert,
+    enabled: bool,
+) -> Result<(), AlertError> {
+    let operators = |a: &Alert| {
+        a.query_condition
+            .conditions
+            .as_ref()
+            .map(config::meta::alerts::condition_ops::extended_operators_of)
+            .unwrap_or_default()
+    };
+    config::meta::alerts::condition_ops::check_extended_operators(
+        enabled,
+        &operators(alert),
+        &stored.map(operators).unwrap_or_default(),
+    )
+    .map_err(AlertError::InvalidCondition)
 }
 
 #[cfg(test)]
@@ -4845,6 +4884,7 @@ mod threshold_validation_tests {
                 operator: config::meta::alerts::Operator::GreaterThan,
                 value: json!(90),
                 ignore_case: false,
+                case_insensitive: None,
             },
             warning_value: None,
             multi_alert: true,
@@ -4864,6 +4904,7 @@ mod threshold_validation_tests {
             operator: config::meta::alerts::Operator::GreaterThan,
             value: json!(10),
             ignore_case: false,
+            case_insensitive: None,
         });
         alert.query_condition.promql_multi_alert = true;
         alert.trigger_condition.operator = config::meta::alerts::Operator::GreaterThanEquals;
@@ -5082,6 +5123,7 @@ mod group_by_validation_tests {
                 operator: Operator::GreaterThan,
                 value: json!(100),
                 ignore_case: false,
+                case_insensitive: None,
             },
             warning_value: None,
             multi_alert: false,
@@ -5773,6 +5815,7 @@ mod tests {
             operator: Operator::Contains,
             value: json!("enrique"),
             ignore_case: false,
+            case_insensitive: None,
         };
         let sql = build_expr(&condition, "", &DataType::Utf8).unwrap();
         assert_eq!(sql, "str_match(\"auth_username\", 'enrique')");
@@ -7823,6 +7866,7 @@ mod tests {
                 operator: config::meta::alerts::Operator::GreaterThanEquals,
                 value: json!(85.5),
                 ignore_case: false,
+                case_insensitive: None,
             },
             warning_value: Some(70.0),
             multi_alert: false,
@@ -8201,6 +8245,7 @@ mod tests {
             operator: config::meta::alerts::Operator::LessThanEquals,
             value: json!(7),
             ignore_case: false,
+            case_insensitive: None,
         });
         alert.query_condition.promql = Some(
             "((disk_used) >= 0.9) * 0 or clamp_min(ceil((0.9 - (disk_used)) / (deriv((disk_used)[2d:15m]) > 0) / 8640 - 1e-6) / 10, 0) or ((disk_used) * 0 + 36500)".into(),
@@ -8784,6 +8829,7 @@ mod tests {
                 operator: config::meta::alerts::Operator::GreaterThanEquals,
                 value: json!(85.5),
                 ignore_case: false,
+                case_insensitive: None,
             },
             warning_value: None,
             multi_alert: false,
@@ -8886,6 +8932,90 @@ mod tests {
             ),
             "{res:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn prepare_alert_rejects_an_extended_operator_outside_the_condition_tree() {
+        use config::meta::alerts::{AggFunction, Aggregation, Condition};
+
+        let cond = |operator| Condition {
+            column: "v".to_string(),
+            operator,
+            value: serde_json::json!(1),
+            ignore_case: false,
+            case_insensitive: None,
+        };
+        let err = prepare_schedule(|a| a.trigger_condition.operator = Operator::In).await;
+        assert!(
+            matches!(&err, AlertError::InvalidCondition(m) if m.contains("trigger condition")),
+            "{err:?}"
+        );
+        let err = prepare_schedule(|a| {
+            a.query_condition.promql_condition = Some(cond(Operator::ReMatch));
+        })
+        .await;
+        assert!(
+            matches!(&err, AlertError::InvalidCondition(m) if m.contains("PromQL condition")),
+            "{err:?}"
+        );
+        let err = prepare_schedule(|a| {
+            a.query_condition.aggregation = Some(Aggregation {
+                group_by: None,
+                function: AggFunction::Count,
+                having: cond(Operator::StartsWith),
+                warning_value: None,
+                multi_alert: false,
+            });
+        })
+        .await;
+        assert!(
+            matches!(&err, AlertError::InvalidCondition(m) if m.contains("aggregation having")),
+            "{err:?}"
+        );
+        let err = prepare_schedule(|a| {
+            a.trigger_condition.frequency = 60;
+            a.query_condition.promql_condition = Some(cond(Operator::GreaterThan));
+        })
+        .await;
+        assert!(!matches!(err, AlertError::InvalidCondition(_)), "{err:?}");
+    }
+
+    fn with_condition_operator(alert: &mut Alert, operator: &str) {
+        alert.query_condition.conditions = Some(
+            serde_json::from_value(serde_json::json!({"version": 2, "conditions": {
+                "filterType": "group", "logicalOperator": "AND", "conditions": [
+                    {"filterType": "condition", "column": "level", "operator": operator,
+                     "value": ["error"], "logicalOperator": "AND"}]}}))
+            .unwrap(),
+        );
+    }
+
+    #[tokio::test]
+    async fn prepare_alert_refuses_a_new_in_condition_while_the_flag_is_off() {
+        let err = prepare_schedule(|a| {
+            a.trigger_condition.frequency = 60;
+            with_condition_operator(a, "in");
+        })
+        .await;
+        assert!(
+            matches!(&err, AlertError::InvalidCondition(m)
+                if m.contains("'in'") && m.contains("ZO_ALERT_EXTENDED_CONDITION_OPERATORS")),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn an_extended_operator_already_stored_stays_saveable_while_the_flag_is_off() {
+        let (mut stored, mut edited) = (Alert::default(), Alert::default());
+        with_condition_operator(&mut stored, "in");
+        with_condition_operator(&mut edited, "in");
+        assert!(check_condition_operators(Some(&stored), &edited, false).is_ok());
+
+        with_condition_operator(&mut stored, "=");
+        assert!(check_condition_operators(Some(&stored), &edited, false).is_err());
+        assert!(check_condition_operators(None, &edited, false).is_err());
+        assert!(check_condition_operators(None, &edited, true).is_ok());
+        assert!(check_condition_operators(Some(&stored), &edited, true).is_ok());
     }
 
     #[tokio::test]

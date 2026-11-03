@@ -11,6 +11,11 @@ import {
   isNumericYField,
 } from "@/utils/dashboard/heatmapYAxis";
 
+const BARE_NUMBER = /^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/;
+const BARE_BOOLEAN = /^(true|false)$/i;
+const BARE_PLACEHOLDER =
+  /^(\{\{\s*[\w-]+\s*(:\s*[a-zA-Z]+\s*)?\}\}|\$\{\s*[\w-]+\s*(:\s*[a-zA-Z]+\s*)?\}|\$[\w-]+)$/;
+
 export function buildSQLQueryFromInput(fields: any, defaultStream: any): string {
   // Handle undefined or null fields
   if (!fields) {
@@ -606,6 +611,9 @@ export function addMissingArgs(fields: any): any {
   };
 }
 
+const isBareSqlLiteral = (value: string) =>
+  BARE_NUMBER.test(value) || BARE_BOOLEAN.test(value) || BARE_PLACEHOLDER.test(value);
+
 /**
  * Format a value to be used in a SQL query.
  * @param value - the value to format
@@ -639,9 +647,12 @@ const formatValue = (
     tempValue = value.substring(1, value.length - 1);
   }
   // escape any single quotes in the value
-  tempValue = escapeSingleQuotes(tempValue);
+  tempValue = escapeSingleQuotes(String(tempValue));
   // Quote string values, leave numeric values unquoted
   if (columnType === "Utf8") {
+    tempValue = `'${tempValue}'`;
+  } else if (columnType !== undefined && !isBareSqlLiteral(tempValue)) {
+    // Anything but a plain number, boolean or lone $variable is quoted, so a value can never splice SQL into the query.
     tempValue = `'${tempValue}'`;
   } else if (columnType === undefined) {
     // Schema not loaded — infer from value: quote unless it's purely numeric
@@ -719,6 +730,14 @@ export const buildCondition = (condition: any, dashboardPanelData: any) => {
           selectFilter += `IS NOT NULL`;
           break;
       }
+    } else if (condition.operator === "Is Empty" || condition.operator === "Is Not Empty") {
+      const fieldRef = streamAlias
+        ? `${streamAlias}.${condition.column.field}`
+        : condition.column.field;
+      selectFilter +=
+        condition.operator === "Is Empty"
+          ? `(${fieldRef} IS NULL OR ${fieldRef} = '')`
+          : `(${fieldRef} IS NOT NULL AND ${fieldRef} != '')`;
     } else if (condition.operator === "IN") {
       const fieldRef = streamAlias
         ? `${streamAlias}.${condition.column.field}`
@@ -809,6 +828,18 @@ export const buildCondition = (condition: any, dashboardPanelData: any) => {
   return "";
 };
 
+// A blank condition is dropped with its connector, so each kept item keeps its own AND/OR.
+const buildConditionList = (
+  conditions: any[],
+  dashboardPanelData: any,
+): { sql: string; logicalOperator: string }[] =>
+  conditions
+    .map((condition: any) => ({
+      sql: buildCondition(condition, dashboardPanelData),
+      logicalOperator: condition?.logicalOperator || "AND",
+    }))
+    .filter(({ sql }) => Boolean(sql));
+
 /**
  * Build a WHERE clause from the given filter data.
  * @param {array} filterData - an array of filter objects, each with properties
@@ -827,15 +858,8 @@ const buildWhereClause = (filterData: any, dashboardPanelData: any) => {
  * and can leave a trailing AND.
  */
 const joinConditions = (conditions: any[], dashboardPanelData: any): string =>
-  (conditions ?? [])
-    .map((condition: any) => ({
-      sql: buildCondition(condition, dashboardPanelData),
-      logicalOperator: condition?.logicalOperator || "AND",
-    }))
-    .filter((part: any) => part.sql)
-    .map((part: any, index: number) =>
-      index === 0 ? part.sql : `${part.logicalOperator} ${part.sql}`,
-    )
+  buildConditionList(conditions ?? [], dashboardPanelData)
+    .map((part, index) => (index === 0 ? part.sql : `${part.logicalOperator} ${part.sql}`))
     .join(" ");
 
 export const mapChart = (dashboardPanelData: any) => {
