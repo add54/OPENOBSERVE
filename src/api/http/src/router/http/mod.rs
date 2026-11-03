@@ -34,8 +34,9 @@ use config::{
         },
     },
     router::{
-        extract_path_without_query, is_fixed_querier_route, is_public_dashboard_slug,
-        is_querier_route, is_querier_route_by_body, public_dashboard_slug,
+        extract_path_without_query, is_fixed_querier_route, is_mcp_endpoint,
+        is_public_dashboard_slug, is_querier_route, is_querier_route_by_body,
+        public_dashboard_slug,
     },
     utils::{json, rand::get_rand_element},
 };
@@ -817,7 +818,8 @@ const STREAMING_ENDPOINTS: &[&str] = &[
 
 /// Checks if the request path is for a streaming endpoint.
 fn is_streaming_endpoint(path: &str) -> bool {
-    STREAMING_ENDPOINTS.iter().any(|&ep| path.ends_with(ep))
+    // `GET /mcp` is an endless SSE keep-alive stream that buffering would never deliver.
+    STREAMING_ENDPOINTS.iter().any(|&ep| path.ends_with(ep)) || is_mcp_endpoint(path)
 }
 
 /// Reads payload bytes with error handling.
@@ -982,6 +984,9 @@ mod tests {
         assert!(is_streaming_endpoint(
             "/api/v2/org/alerts/incidents/inc1/rca/live_stream"
         ));
+        assert!(is_streaming_endpoint("/api/org/mcp"));
+        assert!(is_streaming_endpoint("/base/api/org/mcp"));
+        assert!(!is_streaming_endpoint("/api/org/streams/mcp"));
         assert!(!is_streaming_endpoint("/api/org/_search"));
         assert!(!is_streaming_endpoint("/api/org/logs"));
     }
