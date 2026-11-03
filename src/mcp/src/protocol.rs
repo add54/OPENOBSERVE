@@ -159,7 +159,6 @@ fn handle_server_discover() -> Result<Value> {
         "supportedVersions": MCP_SUPPORTED_PROTOCOL_VERSIONS,
         "capabilities": {
             "tools": {},
-            "completions": {},
         },
         "instructions": "OpenObserve observability tools. Call tool_search to discover tools for streams, logs, metrics, traces, alerts, dashboards, etc., then execute them via tools_call.",
         "ttlMs": DISCOVER_TTL_MS,
@@ -179,7 +178,6 @@ fn handle_initialize(_params: Value) -> Result<Value> {
         protocol_version: MCP_PROTOCOL_VERSION.to_string(),
         capabilities: ServerCapabilities {
             tools: ToolsCapability {},
-            completions: Some(serde_json::Map::new()),
         },
         server_info: ServerInfo {
             name: MCP_SERVER_NAME.to_string(),
@@ -896,6 +894,18 @@ mod tests {
             result["_meta"]["io.modelcontextprotocol/serverInfo"]["name"],
             json!(MCP_SERVER_NAME)
         );
+    }
+
+    #[test]
+    fn initialize_advertises_only_implemented_capabilities() {
+        let result = handle_initialize(Value::Null).unwrap();
+        assert_eq!(result["capabilities"], json!({ "tools": {} }));
+    }
+
+    #[test]
+    fn server_discover_advertises_only_implemented_capabilities() {
+        let result = handle_server_discover().unwrap();
+        assert_eq!(result["capabilities"], json!({ "tools": {} }));
     }
 
     #[tokio::test]
