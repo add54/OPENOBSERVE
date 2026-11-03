@@ -249,6 +249,11 @@ mod m20261030_000001_create_org_domain_ownership_table;
 mod m20261030_000002_create_org_domain_ownership_req_table;
 mod m20261101_000001_create_oncall_slack;
 mod m20261103_000001_add_status_streaks_to_synthetics;
+mod m20261120_000001_add_template_applies_to;
+mod m20261120_000002_rename_reserved_template_collisions;
+mod m20261120_000003_add_anomaly_template;
+mod m20261201_000001_add_synthetics_template;
+mod m20261210_000001_add_oncall_policy_template;
 /// Shared body of the two `folder_id` migrations above; not a migration itself.
 mod workflow_folder_id;
 
@@ -769,6 +774,11 @@ impl MigratorTrait for Migrator {
             Box::new(m20261030_000002_create_org_domain_ownership_req_table::Migration),
             Box::new(m20261101_000001_create_oncall_slack::Migration),
             Box::new(m20261103_000001_add_status_streaks_to_synthetics::Migration),
+            Box::new(m20261120_000001_add_template_applies_to::Migration),
+            Box::new(m20261120_000002_rename_reserved_template_collisions::Migration),
+            Box::new(m20261120_000003_add_anomaly_template::Migration),
+            Box::new(m20261201_000001_add_synthetics_template::Migration),
+            Box::new(m20261210_000001_add_oncall_policy_template::Migration),
         ]
     }
 }
@@ -870,6 +880,11 @@ mod tests {
         ),
         (132, "m20261101_000001_create_oncall_slack"),
         (133, "m20261103_000001_add_status_streaks_to_synthetics"),
+        (134, "m20261120_000001_add_template_applies_to"),
+        (135, "m20261120_000002_rename_reserved_template_collisions"),
+        (136, "m20261120_000003_add_anomaly_template"),
+        (137, "m20261201_000001_add_synthetics_template"),
+        (138, "m20261210_000001_add_oncall_policy_template"),
     ];
 
     // Two branches that each claim the next version merge cleanly, so a reused number must fail

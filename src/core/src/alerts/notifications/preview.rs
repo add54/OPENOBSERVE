@@ -21,7 +21,9 @@
 //! [`render`] functions Task 9's `send_notification` calls, never a
 //! reimplementation. See `preview_uses_production_renderer` below.
 
-use config::meta::alerts::{content_spec::ContentSpec, level::AlertLevel};
+use config::meta::alerts::{
+    content_spec::ContentSpec, level::AlertLevel, notification_kind::NotificationKind,
+};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -44,6 +46,9 @@ pub struct PreviewRequest {
     /// Reserved for the Phase-1b alert-driven sample source; ignored in 1a.
     #[serde(default)]
     pub sample: Option<serde_json::Value>,
+    /// Which producer's sample to render with; absent means alert.
+    #[serde(default)]
+    pub kind: NotificationKind,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -53,6 +58,10 @@ pub struct PreviewResponse {
     /// FE card rendering schema.
     pub preview_model: PreviewModel,
     pub unknown_variables: Vec<String>,
+    /// Every variable a template of the requested kind can use.
+    pub variables: Vec<String>,
+    /// `common` and one group per kind whose producer renders templates in this release.
+    pub variable_groups: Vec<super::examples::VariableGroup>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -203,6 +212,7 @@ pub fn synthetic_context(level: Option<AlertLevel>) -> NotificationContext {
         chart_png: None,
         alert_id: String::new(),
         incident_id: String::new(),
+        ..Default::default()
     }
 }
 
@@ -220,7 +230,16 @@ pub fn preview(req: &PreviewRequest) -> Result<PreviewResponse, PreviewError> {
         .validate()
         .map_err(PreviewError::InvalidContent)?;
 
-    let ctx = synthetic_context(level);
+    let ctx = match req.kind {
+        NotificationKind::Alert => synthetic_context(level),
+        kind => {
+            let mut ctx = super::examples::example_context(kind, level == Some(AlertLevel::Ok));
+            if level.is_some() {
+                ctx.level = level;
+            }
+            ctx
+        }
+    };
 
     let content = resolve_content(&req.definition, &ctx, format.channel_family());
     let rendered =
@@ -277,6 +296,8 @@ pub fn preview(req: &PreviewRequest) -> Result<PreviewResponse, PreviewError> {
         payload,
         preview_model,
         unknown_variables: content.unknown_variables,
+        variables: super::examples::variables_for(req.kind),
+        variable_groups: super::examples::variable_groups(),
     })
 }
 
@@ -311,6 +332,7 @@ mod tests {
             channel: "slack".into(),
             severity: Some("critical".into()),
             sample: None,
+            kind: Default::default(),
         };
         let err = preview(&req).expect_err("hostile link previewed cleanly");
         assert!(
@@ -326,6 +348,7 @@ mod tests {
             channel: "slack".into(),
             severity: Some("critical".into()),
             sample: None,
+            kind: Default::default(),
         };
         let resp = preview(&req).unwrap();
         // Same payload the send path would produce for the same spec +
@@ -357,6 +380,7 @@ mod tests {
             channel: "slack".into(),
             severity: Some("critical".into()),
             sample: None,
+            kind: Default::default(),
         })
         .unwrap();
         assert!(
@@ -372,6 +396,7 @@ mod tests {
             channel: "slack".into(),
             severity: None,
             sample: None,
+            kind: Default::default(),
         })
         .unwrap();
         assert!(
@@ -384,6 +409,52 @@ mod tests {
     }
 
     #[test]
+    fn an_incident_preview_renders_the_incident_sample_and_lists_the_incident_group() {
+        let mut spec = sample_spec();
+        spec.body = "{incident_title} on {incident_service}".into();
+        let resp = preview(&PreviewRequest {
+            definition: spec,
+            channel: "slack".into(),
+            severity: None,
+            sample: None,
+            kind: NotificationKind::Incident,
+        })
+        .unwrap();
+        assert!(
+            resp.unknown_variables.is_empty(),
+            "{:?}",
+            resp.unknown_variables
+        );
+        assert!(resp.variables.iter().any(|v| v == "incident_id"));
+        assert!(resp.preview_model.body_html.contains("checkout"));
+        let groups: Vec<&str> = resp
+            .variable_groups
+            .iter()
+            .map(|g| g.name.as_str())
+            .collect();
+        assert_eq!(
+            groups,
+            [
+                "common",
+                "alert",
+                "incident",
+                "anomaly",
+                "synthetics",
+                "downtime",
+                "on_call"
+            ]
+        );
+        let incident = &resp.variable_groups[2];
+        assert!(incident.variables.iter().any(|v| v == "incident_severity"));
+        assert!(
+            !resp.variable_groups[0]
+                .variables
+                .iter()
+                .any(|v| v == "incident_id")
+        );
+    }
+
+    #[test]
     fn unknown_variables_reported() {
         let mut spec = sample_spec();
         spec.body = "{alert_name} {alert_time_zzz}".into();
@@ -392,6 +463,7 @@ mod tests {
             channel: "webhook".into(),
             severity: None,
             sample: None,
+            kind: Default::default(),
         })
         .unwrap();
         assert_eq!(resp.unknown_variables, vec!["alert_time_zzz"]);
@@ -406,6 +478,7 @@ mod tests {
             channel: "slack".into(),
             severity: Some("criticall".into()),
             sample: None,
+            kind: Default::default(),
         })
         .unwrap_err();
         assert!(matches!(err, PreviewError::UnknownSeverity(ref s) if s == "criticall"));
@@ -421,6 +494,7 @@ mod tests {
                 channel: "slack".into(),
                 severity: ok,
                 sample: None,
+                kind: Default::default(),
             })
             .expect("documented severity values must be accepted");
             payloads.push(resp.payload);

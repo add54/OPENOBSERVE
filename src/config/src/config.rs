@@ -131,7 +131,12 @@ pub type RwBTreeMap<K, V> = tokio::sync::RwLock<BTreeMap<K, V>>;
 // 131: org domain mapping migrations
 // 132: create oncall_chat_messages; add oncall_teams slack columns.
 // 133: add status page run streaks to synthetics.
-pub const DB_SCHEMA_VERSION: u64 = 133;
+// 134: add applies_to to templates.
+// 135: rename user templates under the reserved o2_default_ prefix.
+// 136: add template to anomaly_detection_config.
+// 137: add template to synthetics.
+// 138: add template to oncall_policies.
+pub const DB_SCHEMA_VERSION: u64 = 138;
 pub const DB_SCHEMA_KEY: &str = "/db_schema_version/";
 
 // global version variables
