@@ -16,6 +16,7 @@
 use std::str::FromStr;
 
 use anyhow::{Result, anyhow};
+use rmcp_openapi::error::{NetworkErrorCategory, ToolCallError, ToolCallExecutionError};
 use serde_json::{Value, json};
 
 use super::{
@@ -26,6 +27,30 @@ use super::{
 
 /// Answer given to tool calls when the MCP tool registry was never built.
 const MCP_DISABLED_MESSAGE: &str = "MCP is disabled on this node (ZO_MCP_ENABLED=false)";
+
+/// A failed request, carrying the JSON-RPC code the client should see.
+struct RpcError {
+    code: MCPErrorCode,
+    message: String,
+}
+
+impl RpcError {
+    fn invalid_params(message: impl Into<String>) -> Self {
+        Self {
+            code: MCPErrorCode::InvalidParams,
+            message: message.into(),
+        }
+    }
+}
+
+impl<E: Into<anyhow::Error>> From<E> for RpcError {
+    fn from(error: E) -> Self {
+        Self {
+            code: MCPErrorCode::InternalError,
+            message: error.into().to_string(),
+        }
+    }
+}
 
 /// Route an MCP request to the appropriate handler
 pub async fn route_request(
@@ -80,14 +105,14 @@ pub async fn route_request(
     let mcp_enabled = config::get_config().common.mcp_enabled;
 
     // Route to handler
-    let result = match method {
-        MCPMethod::Initialize => handle_initialize(request.params),
-        MCPMethod::Ping => handle_ping(),
+    let result: Result<Value, RpcError> = match method {
+        MCPMethod::Initialize => handle_initialize(request.params).map_err(RpcError::from),
+        MCPMethod::Ping => handle_ping().map_err(RpcError::from),
         MCPMethod::ToolsList if !mcp_enabled => Ok(json!({ "tools": [] })),
-        MCPMethod::ToolsCall if !mcp_enabled => Err(anyhow!(MCP_DISABLED_MESSAGE)),
-        MCPMethod::ToolsList => handle_tools_list(),
+        MCPMethod::ToolsCall if !mcp_enabled => Err(anyhow!(MCP_DISABLED_MESSAGE).into()),
+        MCPMethod::ToolsList => handle_tools_list().map_err(RpcError::from),
         MCPMethod::ToolsCall => handle_tools_call(org_id, request.params, auth_token).await,
-        MCPMethod::ServerDiscover => handle_server_discover(),
+        MCPMethod::ServerDiscover => handle_server_discover().map_err(RpcError::from),
         // Notifications are one-way; no response body required (HTTP layer returns 202)
         MCPMethod::NotificationsInitialized => Ok(Value::Null),
     };
@@ -99,12 +124,7 @@ pub async fn route_request(
             }
             Ok(MCPResponse::success(request.id, value))
         }
-        Err(e) => Ok(MCPResponse::error(
-            request.id,
-            MCPErrorCode::InternalError,
-            e.to_string(),
-            None,
-        )),
+        Err(e) => Ok(MCPResponse::error(request.id, e.code, e.message, None)),
     }
 }
 
@@ -300,13 +320,13 @@ async fn handle_direct_call(
     args: Value,
     detail: &DetailLevel,
     auth_token: Option<String>,
-) -> Result<Value> {
+) -> Result<Value, RpcError> {
     // Find the tool metadata for execution
-    let tool_metadata =
-        get_tool_metadata(tool_name).ok_or_else(|| anyhow!("Tool '{}' not found", tool_name))?;
+    let tool_metadata = get_tool_metadata(tool_name)
+        .ok_or_else(|| RpcError::invalid_params(format!("Unknown tool: {tool_name}")))?;
 
-    // Execute the tool using shared HTTP client
-    let result = execute_tool(org_id, &tool_metadata, args, detail, auth_token).await?;
+    let client = authorized_client(auth_token);
+    let result = execute_tool(&client, org_id, &tool_metadata, args, detail).await;
 
     Ok(serde_json::to_value(result)?)
 }
@@ -317,23 +337,27 @@ async fn handle_tools_call(
     org_id: &str,
     params: Value,
     auth_token: Option<String>,
-) -> Result<Value> {
+) -> Result<Value, RpcError> {
     // Parse parameters
     let call_params: ToolsCallParams = serde_json::from_value(params)
-        .map_err(|e| anyhow!("Invalid tools/call parameters: {e}"))?;
+        .map_err(|e| RpcError::invalid_params(format!("Invalid tools/call parameters: {e}")))?;
 
     match call_params.name.as_str() {
         "tool_search" => {
-            let args: ToolSearchArgs = serde_json::from_value(call_params.arguments)
-                .map_err(|e| anyhow!("Invalid arguments for tool_search: {}", e))?;
+            let args: ToolSearchArgs =
+                serde_json::from_value(call_params.arguments).map_err(|e| {
+                    RpcError::invalid_params(format!("Invalid arguments for tool_search: {e}"))
+                })?;
             let result = handle_tool_search(&args.query, args.limit)?;
             Ok(json!({
                 "content": [{"type": "text", "text": serde_json::to_string(&result)?}]
             }))
         }
         "tools_call" => {
-            let args: ToolsCallSimpleArgs = serde_json::from_value(call_params.arguments)
-                .map_err(|e| anyhow!("Invalid arguments for tools_call: {}", e))?;
+            let args: ToolsCallSimpleArgs =
+                serde_json::from_value(call_params.arguments).map_err(|e| {
+                    RpcError::invalid_params(format!("Invalid arguments for tools_call: {e}"))
+                })?;
             handle_direct_call(org_id, &args.tool, args.args, &args.detail, auth_token).await
         }
         // Pinned tools are exposed directly in tools/list and called by name.
@@ -479,14 +503,42 @@ fn structured_content(content_text: &str) -> Option<Value> {
         .filter(Value::is_object)
 }
 
-/// Execute a tool using the shared HTTP client
+/// The shared HTTP client, carrying the caller's own credentials when it sent any.
+fn authorized_client(auth_token: Option<String>) -> rmcp_openapi::HttpClient {
+    let shared_client = get_shared_http_client();
+    match auth_token {
+        Some(token) => shared_client.with_authorization(&token),
+        None => shared_client.clone(),
+    }
+}
+
+/// What a client may be told of a failed API request; the cause stays in the server log.
+fn execution_failure_text(error: &ToolCallExecutionError) -> &'static str {
+    match error {
+        ToolCallExecutionError::NetworkError {
+            category: NetworkErrorCategory::Timeout,
+            ..
+        } => "the request timed out; retry with a narrower request or a larger `timeout_seconds`",
+        _ => "the request to the OpenObserve API could not be completed",
+    }
+}
+
+fn error_result(text: String) -> ToolsCallResult {
+    ToolsCallResult {
+        content: vec![ToolContent::Text { text }],
+        is_error: Some(true),
+        structured_content: None,
+    }
+}
+
+/// Execute a tool through `client`; every failure comes back as an `isError` result.
 async fn execute_tool(
+    client: &rmcp_openapi::HttpClient,
     org_id: &str,
     metadata: &rmcp_openapi::ToolMetadata,
     mut arguments: Value,
     detail: &DetailLevel,
-    auth_token: Option<String>,
-) -> Result<ToolsCallResult> {
+) -> ToolsCallResult {
     // LLMs frequently hoist request-body fields to the top level of the tool
     // arguments (e.g. `tabId` on AddPanel/UpdatePanel, which the schema nests
     // under `request_body`). That fails rmcp-openapi validation with
@@ -495,24 +547,21 @@ async fn execute_tool(
     // so the underlying HTTP API contract stays untouched.
     normalize_request_body_fields(&metadata.parameters, &mut arguments);
     bind_organization(&metadata.path, &mut arguments, org_id);
-    encode_path_parameters(metadata, &mut arguments)?;
+    if let Err(e) = encode_path_parameters(metadata, &mut arguments) {
+        return error_result(format!("Tool execution failed: {e}"));
+    }
 
-    // Get the shared HTTP client
-    let shared_client = get_shared_http_client();
-
-    // If we have an auth token, create a client with authorization header
-    // Otherwise use the shared client directly
-    let http_client = if let Some(token) = auth_token {
-        shared_client.with_authorization(&token)
-    } else {
-        shared_client.clone()
+    let http_response = match client.execute_tool_call(metadata, &arguments).await {
+        Ok(response) => response,
+        Err(ToolCallError::Validation(e)) => {
+            return error_result(format!("Tool execution failed: {e}"));
+        }
+        Err(ToolCallError::Execution(e)) => {
+            log::warn!("MCP tool {} failed: {e}", metadata.name);
+            let reason = execution_failure_text(&e);
+            return error_result(format!("Tool execution failed: {reason}"));
+        }
     };
-
-    // Execute the HTTP request using the shared client
-    let http_response = http_client
-        .execute_tool_call(metadata, &arguments)
-        .await
-        .map_err(|e| anyhow!("Tool execution failed: {}", e))?;
 
     // Convert HTTP response to our format
     let is_error = !http_response.is_success;
@@ -526,17 +575,15 @@ async fn execute_tool(
         filter_response(&metadata.name, &http_response.body, detail)
     };
 
-    let structured_content = if !is_error {
-        structured_content(&content_text)
-    } else {
-        None
-    };
+    if is_error {
+        return error_result(content_text);
+    }
 
-    Ok(ToolsCallResult {
+    ToolsCallResult {
+        structured_content: structured_content(&content_text),
         content: vec![ToolContent::Text { text: content_text }],
-        is_error: if is_error { Some(true) } else { None },
-        structured_content,
-    })
+        is_error: None,
+    }
 }
 
 #[cfg(test)]
@@ -1096,7 +1143,180 @@ mod tests {
         };
 
         let response = route_request("default", request, None).await.unwrap();
-        assert!(response.error.is_some());
-        assert_eq!(response.error.unwrap().code, -32603); // InternalError
+        let error = response.error.unwrap();
+        assert_eq!(error.code, -32602);
+        assert_eq!(error.message, "Unknown tool: unknown_tool");
+    }
+
+    #[tokio::test]
+    async fn malformed_tools_call_requests_are_invalid_params() {
+        tools::init_test_tools().await;
+
+        for params in [
+            json!({}),
+            json!({ "name": "tool_search", "arguments": {} }),
+            json!({ "name": "tools_call", "arguments": { "tool": "x" } }),
+            json!({ "name": "tools_call", "arguments": { "tool": "x", "args": {}, "detail": "everything" } }),
+        ] {
+            let request = MCPRequest {
+                jsonrpc: JSONRPC_VERSION.to_string(),
+                id: Some(Value::from(1)),
+                method: "tools/call".to_string(),
+                params: params.clone(),
+            };
+            let response = route_request("default", request, None).await.unwrap();
+            assert_eq!(response.error.unwrap().code, -32602, "{params}");
+        }
+    }
+
+    #[test]
+    fn unexpected_failures_stay_internal_errors() {
+        let error = RpcError::from(anyhow!("boom"));
+        assert_eq!(error.code, MCPErrorCode::InternalError);
+        assert_eq!(error.message, "boom");
+    }
+
+    /// Schema like a real tool's: required path parameters plus `timeout_seconds`.
+    fn lookup_tool() -> rmcp_openapi::ToolMetadata {
+        let mut tool = dashboard_tool();
+        tool.parameters = json!({
+            "type": "object",
+            "properties": {
+                "org_id": {"type": "string"},
+                "dashboard_id": {"type": "string"},
+                "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 300}
+            },
+            "required": ["org_id", "dashboard_id"]
+        });
+        tool
+    }
+
+    async fn loopback_listener() -> (tokio::net::TcpListener, url::Url) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = url::Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
+        (listener, base)
+    }
+
+    /// A client whose server answers one request with `status` and `body`.
+    async fn client_answering(status: &'static str, body: Vec<u8>) -> rmcp_openapi::HttpClient {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let (listener, base) = loopback_listener().await;
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let (mut request, mut chunk) = (Vec::new(), [0u8; 1024]);
+            while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+                let n = socket.read(&mut chunk).await.unwrap();
+                if n == 0 {
+                    break;
+                }
+                request.extend_from_slice(&chunk[..n]);
+            }
+            let head = format!(
+                "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n",
+                body.len()
+            );
+            let _ = socket.write_all(head.as_bytes()).await;
+            let _ = socket.write_all(&body).await;
+        });
+        rmcp_openapi::HttpClient::new().with_base_url(base).unwrap()
+    }
+
+    /// A client whose server accepts the connection and never answers.
+    async fn client_never_answered() -> rmcp_openapi::HttpClient {
+        let (listener, base) = loopback_listener().await;
+        tokio::spawn(async move {
+            let _held = listener.accept().await;
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        });
+        rmcp_openapi::HttpClient::new().with_base_url(base).unwrap()
+    }
+
+    /// A client whose server is gone, so connecting is refused.
+    async fn client_refused() -> rmcp_openapi::HttpClient {
+        let (listener, base) = loopback_listener().await;
+        drop(listener);
+        rmcp_openapi::HttpClient::new().with_base_url(base).unwrap()
+    }
+
+    async fn run(client: &rmcp_openapi::HttpClient, arguments: Value) -> ToolsCallResult {
+        execute_tool(
+            client,
+            "acme",
+            &lookup_tool(),
+            arguments,
+            &DetailLevel::Summary,
+        )
+        .await
+    }
+
+    fn text_of(result: &ToolsCallResult) -> &str {
+        match &result.content[..] {
+            [ToolContent::Text { text }] => text,
+            other => panic!("expected one text block, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn invalid_arguments_are_a_tool_error_with_the_validation_message() {
+        // Validation fails before any request is sent, so the server is never reached.
+        let client = client_refused().await;
+        for (arguments, expected) in [
+            (json!({ "dashboard_id": "d1", "bogus": 1 }), "bogus"),
+            (json!({}), "dashboard_id"),
+            (json!({ "dashboard_id": 5 }), "not of type"),
+            (json!({ "dashboard_id": ".." }), "dashboard_id"),
+        ] {
+            let result = run(&client, arguments.clone()).await;
+            assert_eq!(result.is_error, Some(true), "{arguments}");
+            let text = text_of(&result);
+            assert!(text.contains(expected), "{arguments}: {text}");
+        }
+    }
+
+    #[tokio::test]
+    async fn an_unreachable_api_is_a_tool_error_that_hides_the_address() {
+        let result = run(&client_refused().await, json!({ "dashboard_id": "d1" })).await;
+
+        assert_eq!(result.is_error, Some(true));
+        let text = text_of(&result);
+        assert!(text.contains("could not be completed"), "{text}");
+        assert!(
+            !text.contains("127.0.0.1") && !text.contains("localhost"),
+            "{text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_timeout_is_a_tool_error_that_says_how_to_retry() {
+        let client = client_never_answered().await;
+        let arguments = json!({ "dashboard_id": "d1", "timeout_seconds": 1 });
+        let result = run(&client, arguments).await;
+
+        assert_eq!(result.is_error, Some(true));
+        let text = text_of(&result);
+        assert!(
+            text.contains("timed out") && text.contains("`timeout_seconds`"),
+            "{text}"
+        );
+        assert!(!text.contains("127.0.0.1"), "{text}");
+    }
+
+    #[tokio::test]
+    async fn an_upstream_error_status_stays_a_tool_error() {
+        let client = client_answering("404 Not Found", br#"{"message":"nope"}"#.to_vec()).await;
+        let result = run(&client, json!({ "dashboard_id": "d1" })).await;
+
+        assert_eq!(result.is_error, Some(true));
+        assert_eq!(text_of(&result), r#"Error 404: {"message":"nope"}"#);
+    }
+
+    #[tokio::test]
+    async fn a_successful_object_result_carries_structured_content() {
+        let client = client_answering("200 OK", br#"{"id":"d1"}"#.to_vec()).await;
+        let result = run(&client, json!({ "dashboard_id": "d1" })).await;
+
+        assert_eq!(result.is_error, None);
+        assert_eq!(result.structured_content, Some(json!({ "id": "d1" })));
     }
 }
