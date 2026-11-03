@@ -32,7 +32,10 @@ use flight::common::{MetricsInfo, PreCustomMessage};
 use futures::{StreamExt, stream::BoxStream};
 use futures_util::pin_mut;
 use prost::Message;
-use search::inspector::{SearchInspectorFieldsBuilder, search_inspector_fields};
+use search::{
+    datafusion::distributed_plan::profile,
+    inspector::{SearchInspectorFieldsBuilder, search_inspector_fields},
+};
 use search_service::{grpc::flight as grpcFlight, work_group::DeferredLock};
 use tonic::{Request, Response, Status, Streaming};
 use tracing::Instrument;
@@ -178,6 +181,10 @@ impl FlightService for FlightServiceImpl {
             plan: plan.clone(),
             is_super_cluster,
             func: Box::new(super_cluster_enabled),
+            build_profile: req
+                .search_info
+                .analyze_profile
+                .then_some(profile::build_profile as _),
         });
 
         // Get the peak memory usage from the memory pool
