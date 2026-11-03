@@ -623,6 +623,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 import { configFullQuery, updateCustomLogoTextMutation } from "@/services/config.queries";
 import { useMutation } from "@tanstack/vue-query";
 import { queryClient } from "@/composables/query/queryClient";
+import { markFullConfigLoaded } from "@/composables/useFullConfigLoad";
 import { orgSummaryQuery, updateOrgSettingsMutation } from "@/services/organizations.queries";
 import {
   computed,
@@ -1106,6 +1107,7 @@ export default defineComponent({
                   configFullQuery(store.state.selectedOrganization?.identifier || orgIdentifier),
                 ),
               );
+              markFullConfigLoaded(store.state.selectedOrganization?.identifier || orgIdentifier);
 
               // Clear the appropriate file ref
               if (mode === "dark") {
@@ -1180,6 +1182,7 @@ export default defineComponent({
                   ),
                 ),
             );
+            markFullConfigLoaded(store.state.selectedOrganization?.identifier || orgIdentifier);
           } else {
             toast({
               variant: "error",
