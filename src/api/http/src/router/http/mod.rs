@@ -40,7 +40,7 @@ use config::{
     },
     utils::{json, rand::get_rand_element},
 };
-use futures::StreamExt;
+use futures::{Stream, StreamExt};
 use hashbrown::HashMap;
 use http_body_util::{BodyExt, Limited};
 use infra::cluster;
@@ -689,26 +689,14 @@ async fn build_response(
     if is_streaming {
         let path_for_log = mask_log_url(&target.path);
         let node_for_log = target.node_addr.clone();
-        let stream = resp
-            .bytes_stream()
-            .map(move |chunk| -> Result<Bytes, std::io::Error> {
-                match chunk {
-                    Ok(bytes) => Ok(bytes),
-                    Err(e) => {
-                        log::error!(
-                            "proxy streaming error: {} -> {}, error: {}",
-                            path_for_log,
-                            node_for_log,
-                            mask_log_url(&format!("{e:?}")),
-                        );
-                        let error_event = serde_json::json!({
-                            "type": "error",
-                            "error": format!("Stream interrupted: {e}")
-                        });
-                        Ok(Bytes::from(format!("data: {}\n\n", error_event)))
-                    }
-                }
-            });
+        let stream = relay_chunks(resp.bytes_stream(), move |e: &reqwest::Error| {
+            log::error!(
+                "proxy streaming error: {} -> {}, error: {}",
+                path_for_log,
+                node_for_log,
+                mask_log_url(&format!("{e:?}")),
+            );
+        });
         match builder.body(Body::from_stream(stream)) {
             Ok(r) => r,
             Err(e) => (
@@ -744,6 +732,36 @@ async fn build_response(
                 .into_response(),
         }
     }
+}
+
+/// Relays chunks; the first upstream error becomes one SSE error event and ends the stream.
+fn relay_chunks<S, E>(
+    upstream: S,
+    on_error: impl Fn(&E) + Send + 'static,
+) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send + 'static
+where
+    S: Stream<Item = Result<Bytes, E>> + Send + 'static,
+    E: std::fmt::Display + 'static,
+{
+    // reqwest's total timeout fails every later poll too, so only the first error is relayed.
+    upstream.scan(false, move |failed, chunk| {
+        if *failed {
+            return std::future::ready(None);
+        }
+        let bytes = match chunk {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                *failed = true;
+                on_error(&e);
+                let error_event = serde_json::json!({
+                    "type": "error",
+                    "error": format!("Stream interrupted: {e}")
+                });
+                Bytes::from(format!("data: {error_event}\n\n"))
+            }
+        };
+        std::future::ready(Some(Ok::<_, std::io::Error>(bytes)))
+    })
 }
 
 /// Headers to skip when forwarding requests.
@@ -1264,5 +1282,90 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(&body[..], b"No online nodes");
+    }
+
+    fn chunk(text: &'static str) -> Result<Bytes, &'static str> {
+        Ok(Bytes::from_static(text.as_bytes()))
+    }
+
+    #[tokio::test]
+    async fn relayed_chunks_pass_through_untouched_until_the_upstream_ends() {
+        let upstream = futures::stream::iter([chunk(": connected\n\n"), chunk(": keepalive\n\n")]);
+
+        let relayed: Vec<_> = relay_chunks(upstream, |_| panic!("nothing failed"))
+            .map(|chunk| chunk.unwrap())
+            .collect()
+            .await;
+
+        assert_eq!(relayed, [": connected\n\n", ": keepalive\n\n"]);
+    }
+
+    #[tokio::test]
+    async fn an_upstream_that_fails_forever_is_cut_after_one_error_event() {
+        // A body past the client's total timeout errors again on every later poll.
+        let upstream = futures::stream::iter([chunk(": connected\n\n")])
+            .chain(futures::stream::repeat_with(|| Err("deadline has elapsed")));
+        let reports = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = reports.clone();
+
+        // `take` turns a regression into a failed assertion instead of a hang.
+        let relayed: Vec<_> = relay_chunks(upstream, move |_| {
+            counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        })
+        .take(10)
+        .map(|chunk| chunk.unwrap())
+        .collect()
+        .await;
+
+        assert_eq!(relayed.len(), 2, "{relayed:?}");
+        assert_eq!(relayed[0], ": connected\n\n");
+        let event = std::str::from_utf8(&relayed[1]).unwrap();
+        let payload = event.strip_prefix("data: ").unwrap();
+        assert!(payload.ends_with("\n\n"), "{event:?}");
+        let payload: serde_json::Value = serde_json::from_str(payload.trim_end()).unwrap();
+        assert_eq!(payload["type"], "error");
+        assert_eq!(payload["error"], "Stream interrupted: deadline has elapsed");
+        assert_eq!(reports.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn a_stream_open_at_the_proxy_timeout_ends_after_one_error_event() {
+        // Like GET /mcp between keepalives: one chunk, then silence until the client gives up.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let upstream = axum::Router::new().fallback(|| async {
+            let idle = futures::stream::once(async {
+                Ok::<_, std::io::Error>(Bytes::from_static(b": connected\n\n"))
+            })
+            .chain(futures::stream::pending());
+            Response::builder()
+                .header(header::CONTENT_TYPE, "text/event-stream")
+                .body(Body::from_stream(idle))
+                .unwrap()
+        });
+        tokio::spawn(async move { axum::serve(listener, upstream).await.unwrap() });
+
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(1))
+            .build()
+            .unwrap();
+        let full_url = format!("http://127.0.0.1:{port}/api/default/mcp");
+        let resp = client.get(&full_url).send().await.unwrap();
+        let target = ProxyTarget {
+            path: "/api/default/mcp".to_string(),
+            full_url,
+            node_addr: format!("127.0.0.1:{port}"),
+        };
+
+        let response = build_response(resp, &target, true, std::time::Instant::now()).await;
+        let frames = response.into_body().into_data_stream().take(10).collect();
+        let frames: Vec<_> = tokio::time::timeout(std::time::Duration::from_secs(30), frames)
+            .await
+            .expect("the relayed stream never ended");
+
+        assert_eq!(frames.len(), 2, "{frames:?}");
+        assert_eq!(frames[0].as_ref().unwrap(), ": connected\n\n");
+        let event = frames[1].as_ref().unwrap();
+        assert!(event.starts_with(b"data: {"), "{event:?}");
     }
 }
