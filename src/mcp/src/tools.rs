@@ -180,16 +180,8 @@ struct ToolSearchIndex {
     tools_by_name: HashMap<String, Arc<MCPTool>>,
 }
 
-/// Build the tantivy search index from the list of MCP tools.
-fn build_search_index(tools: &[Arc<MCPTool>]) -> Result<()> {
-    // Idempotent: skip if already initialized (e.g., by test init)
-    if TOOL_SEARCH_INDEX.get().is_some() {
-        log::debug!("Tool search index already initialized; skipping rebuild");
-        return Ok(());
-    }
-
-    let start = std::time::Instant::now();
-
+/// Build a tantivy index over `tools`, independent of the process-wide index.
+fn build_index(tools: &[Arc<MCPTool>]) -> Result<ToolSearchIndex> {
     // Use the O2 tokenizer for the name field to handle CamelCase splitting
     // (e.g., "CreateDashboard" → "create", "dashboard"; "HTTPClient" → "http", "client")
     let o2_text_opts = TextOptions::default().set_indexing_options(
@@ -247,16 +239,28 @@ fn build_search_index(tools: &[Arc<MCPTool>]) -> Result<()> {
         .map(|t| (t.name.clone(), Arc::clone(t)))
         .collect();
 
+    Ok(ToolSearchIndex {
+        index,
+        reader,
+        name_field,
+        description_field,
+        category_field,
+        tool_name_field,
+        tools_by_name,
+    })
+}
+
+/// Build the process-wide tool search index from the list of MCP tools.
+fn build_search_index(tools: &[Arc<MCPTool>]) -> Result<()> {
+    // Idempotent: skip if already initialized (e.g., by test init)
+    if TOOL_SEARCH_INDEX.get().is_some() {
+        log::debug!("Tool search index already initialized; skipping rebuild");
+        return Ok(());
+    }
+
+    let start = std::time::Instant::now();
     TOOL_SEARCH_INDEX
-        .set(ToolSearchIndex {
-            index,
-            reader,
-            name_field,
-            description_field,
-            category_field,
-            tool_name_field,
-            tools_by_name,
-        })
+        .set(build_index(tools)?)
         .map_err(|_| anyhow::anyhow!("Tool search index should've been empty at this point"))?;
 
     log::info!(
@@ -293,9 +297,8 @@ fn loopback_base_url(
         .map_err(|e| anyhow::anyhow!("Invalid base URL: {e}"))
 }
 
-/// Search for tools matching a query string using BM25 scoring.
-/// Returns the top `limit` matching MCPTool objects with full schemas.
-pub fn tool_search(query: &str, limit: usize) -> Vec<MCPTool> {
+/// The top `limit` tools of `search_index` matching `query`, best BM25 score first.
+fn search_in(search_index: &ToolSearchIndex, query: &str, limit: usize) -> Vec<MCPTool> {
     // Validate input
     let query = query.trim();
     if query.is_empty() || limit == 0 {
@@ -319,14 +322,6 @@ pub fn tool_search(query: &str, limit: usize) -> Vec<MCPTool> {
         &query[..safe_len]
     } else {
         query
-    };
-
-    let search_index = match TOOL_SEARCH_INDEX.get() {
-        Some(idx) => idx,
-        None => {
-            log::error!("tool_search: search index not initialized");
-            return Vec::new();
-        }
     };
 
     // Use the cached reader instead of creating one per query
@@ -387,6 +382,18 @@ pub fn tool_search(query: &str, limit: usize) -> Vec<MCPTool> {
         results.len()
     );
     results
+}
+
+/// Search for tools matching a query string using BM25 scoring.
+/// Returns the top `limit` matching MCPTool objects with full schemas.
+pub fn tool_search(query: &str, limit: usize) -> Vec<MCPTool> {
+    match TOOL_SEARCH_INDEX.get() {
+        Some(search_index) => search_in(search_index, query, limit),
+        None => {
+            log::error!("tool_search: search index not initialized");
+            Vec::new()
+        }
+    }
 }
 
 /// Initialize MCP tools from OpenAPI spec using rmcp-openapi
@@ -715,53 +722,76 @@ pub async fn init_test_tools() {
 
     // Initialize empty search index for tests
     TOOL_SEARCH_INDEX
-        .get_or_init(|| async {
-            let o2_text_opts = TextOptions::default().set_indexing_options(
-                TextFieldIndexing::default()
-                    .set_index_option(IndexRecordOption::WithFreqsAndPositions)
-                    .set_tokenizer(O2_TOKENIZER),
-            );
-
-            let mut schema_builder = Schema::builder();
-            let name_field = schema_builder.add_text_field("name", o2_text_opts);
-            let description_field = schema_builder.add_text_field("description", TEXT);
-            let category_field = schema_builder.add_text_field("category", TEXT);
-            let tool_name_field = schema_builder.add_text_field("tool_name", STORED);
-            let schema = schema_builder.build();
-
-            let index = Index::create_in_ram(schema);
-            index
-                .tokenizers()
-                .register(O2_TOKENIZER, o2_tokenizer_build(CollectType::Ingest));
-
-            let mut writer: IndexWriter = index.writer(15_000_000).unwrap();
-            writer.commit().unwrap();
-
-            // Re-register with Search mode for query-time tokenization
-            index
-                .tokenizers()
-                .register(O2_TOKENIZER, o2_tokenizer_build(CollectType::Search));
-
-            let reader = index.reader().unwrap();
-
-            ToolSearchIndex {
-                index,
-                reader,
-                name_field,
-                description_field,
-                category_field,
-                tool_name_field,
-                tools_by_name: HashMap::new(),
-            }
-        })
+        .get_or_init(|| async { build_index(&[]).unwrap() })
         .await;
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use serde_json::json;
 
-    use super::{loopback_base_url, public_tool_schema};
+    use super::{ToolSearchIndex, build_index, loopback_base_url, public_tool_schema, search_in};
+    use crate::types::MCPTool;
+
+    fn tool(name: &str, description: &str, category: &str) -> Arc<MCPTool> {
+        Arc::new(MCPTool {
+            name: name.to_string(),
+            title: None,
+            description: Some(description.to_string()),
+            input_schema: json!({ "type": "object" }),
+            output_schema: None,
+            annotations: None,
+            http_method: "GET".to_string(),
+            http_path: String::new(),
+            category: Some(category.to_string()),
+            requires_confirmation: false,
+            pinned: false,
+        })
+    }
+
+    fn widget_index() -> ToolSearchIndex {
+        build_index(&[
+            tool("CreateWidget", "Create a new widget", "widgets"),
+            tool("ListWidgets", "List all widgets", "widgets"),
+            tool("DeleteGizmo", "Delete a gizmo by ID", "gizmos"),
+        ])
+        .unwrap()
+    }
+
+    fn found(index: &ToolSearchIndex, query: &str, limit: usize) -> Vec<String> {
+        search_in(index, query, limit)
+            .into_iter()
+            .map(|tool| tool.name)
+            .collect()
+    }
+
+    #[test]
+    fn exact_words_rank_the_matching_tool_first() {
+        let index = widget_index();
+        assert_eq!(found(&index, "list widgets", 3)[0], "ListWidgets");
+        assert_eq!(found(&index, "create widget", 3)[0], "CreateWidget");
+        assert_eq!(found(&index, "delete gizmo", 3)[0], "DeleteGizmo");
+    }
+
+    #[test]
+    fn a_camel_case_query_finds_that_tool() {
+        assert_eq!(found(&widget_index(), "ListWidgets", 1), ["ListWidgets"]);
+    }
+
+    #[test]
+    fn unmatched_blank_and_zero_limit_queries_find_nothing() {
+        let index = widget_index();
+        assert!(found(&index, "zebra", 3).is_empty());
+        assert!(found(&index, "   ", 3).is_empty());
+        assert!(found(&index, "widgets", 0).is_empty());
+    }
+
+    #[test]
+    fn the_limit_caps_the_results() {
+        assert_eq!(found(&widget_index(), "widgets", 1).len(), 1);
+    }
 
     #[test]
     fn loopback_targets_the_address_the_server_binds() {
