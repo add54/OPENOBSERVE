@@ -13,7 +13,11 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <http://www.gnu.org/licenses/>.
 
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    net::{IpAddr, SocketAddr},
+    sync::Arc,
+};
 
 use anyhow::{Ok, Result};
 use config::tantivy::tokenizer::{CollectType, O2_TOKENIZER, o2_tokenizer_build};
@@ -267,6 +271,28 @@ fn build_search_index(tools: &[Arc<MCPTool>]) -> Result<()> {
 /// Maximum allowed query length to prevent DoS via pathological inputs
 const MAX_SEARCH_QUERY_LEN: usize = 500;
 
+/// URL of this node's own HTTP listener, which tool calls are looped back to.
+fn loopback_base_url(
+    scheme: &str,
+    bind_addr: &str,
+    ipv6_enabled: bool,
+    port: u16,
+    base_uri: &str,
+) -> Result<url::Url> {
+    // In IPv6 mode the server binds `[::]` and ignores `ZO_HTTP_ADDR` (see `server_addr`).
+    let specific_ip = bind_addr
+        .trim_matches(['[', ']'])
+        .parse::<IpAddr>()
+        .ok()
+        .filter(|ip| !ipv6_enabled && !ip.is_unspecified());
+    let authority = specific_ip.map_or_else(
+        || format!("localhost:{port}"),
+        |ip| SocketAddr::new(ip, port).to_string(),
+    );
+    url::Url::parse(&format!("{scheme}://{authority}{base_uri}"))
+        .map_err(|e| anyhow::anyhow!("Invalid base URL: {e}"))
+}
+
 /// Search for tools matching a query string using BM25 scoring.
 /// Returns the top `limit` matching MCPTool objects with full schemas.
 pub fn tool_search(query: &str, limit: usize) -> Vec<MCPTool> {
@@ -395,13 +421,13 @@ pub fn init_mcp_tools(api: &OpenApi) -> Result<()> {
 
     let zo_config = config::get_config();
     // Include ZO_BASE_URI so tool calls hit the routes actually mounted under it
-    let base_url = url::Url::parse(&format!(
-        "{}://localhost:{}{}",
-        config::cluster::get_http_schema(),
+    let base_url = loopback_base_url(
+        &config::cluster::get_http_schema(),
+        &zo_config.http.addr,
+        zo_config.http.ipv6_enabled,
         zo_config.http.port,
-        zo_config.common.base_uri
-    ))
-    .map_err(|e| anyhow::anyhow!("Invalid base URL: {e}"))?;
+        &zo_config.common.base_uri,
+    )?;
 
     let mut mcp_marker =
         reqwest::header::HeaderValue::from_str(&config::cluster::MCP_LOOPBACK_SECRET)?;
@@ -735,7 +761,35 @@ pub async fn init_test_tools() {
 mod tests {
     use serde_json::json;
 
-    use super::public_tool_schema;
+    use super::{loopback_base_url, public_tool_schema};
+
+    #[test]
+    fn loopback_targets_the_address_the_server_binds() {
+        // (scheme, ZO_HTTP_ADDR, ZO_HTTP_IPV6_ENABLED, ZO_BASE_URI, expected)
+        for (scheme, addr, ipv6, base_uri, expected) in [
+            ("http", "", false, "", "http://localhost:5080/"),
+            ("https", "", false, "/o2", "https://localhost:5080/o2"),
+            ("http", "0.0.0.0", false, "", "http://localhost:5080/"),
+            ("http", "[::]", false, "", "http://localhost:5080/"),
+            ("http", "10.1.2.3", false, "", "http://10.1.2.3:5080/"),
+            (
+                "http",
+                "127.0.0.2",
+                false,
+                "/o2",
+                "http://127.0.0.2:5080/o2",
+            ),
+            ("http", "[::1]", false, "", "http://[::1]:5080/"),
+            ("http", "10.1.2.3", true, "", "http://localhost:5080/"),
+        ] {
+            let url = loopback_base_url(scheme, addr, ipv6, 5080, base_uri).unwrap();
+            assert_eq!(
+                url.as_str(),
+                expected,
+                "{scheme} {addr:?} ipv6={ipv6} {base_uri:?}"
+            );
+        }
+    }
 
     #[test]
     fn organization_path_parameter_is_private() {
