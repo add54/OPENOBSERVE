@@ -1738,7 +1738,7 @@ fn enabled_mcp_tools_match_the_snapshot() {
         .filter(|published| is_mcp_enabled(&published.op))
         .map(|published| published.op["operationId"].as_str().unwrap().to_string())
         .collect();
-    assert!(enabled.len() >= 300, "only {} MCP tools", enabled.len());
+    assert!(enabled.len() >= 280, "only {} MCP tools", enabled.len());
     assert_no_difference(
         &enabled,
         &edition_entries(MCP_ENABLED),

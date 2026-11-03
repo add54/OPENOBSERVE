@@ -40,9 +40,7 @@ all ratelimit PATCH /api/v2/{org_id}/downtimes/move
 all response PATCH /api/v2/{org_id}/downtimes/move
 all mcp POST /api/v2/{org_id}/downtimes/preview
 all ratelimit POST /api/v2/{org_id}/downtimes/preview
-all mcp POST /api/v2/{org_id}/downtimes/resources
 all ratelimit POST /api/v2/{org_id}/downtimes/resources
-all mcp POST /api/v2/{org_id}/downtimes/values
 all ratelimit POST /api/v2/{org_id}/downtimes/values
 all mcp DELETE /api/v2/{org_id}/downtimes/{downtime_id}
 all ratelimit DELETE /api/v2/{org_id}/downtimes/{downtime_id}
@@ -161,7 +159,6 @@ all mcp POST /api/{org_id}/fleet/fleets/{fleet_id}/desired/preview
 all ratelimit POST /api/{org_id}/fleet/fleets/{fleet_id}/desired/preview
 all mcp GET /api/{org_id}/fleet/fleets/{fleet_id}/settings
 all ratelimit GET /api/{org_id}/fleet/fleets/{fleet_id}/settings
-all mcp PUT /api/{org_id}/fleet/fleets/{fleet_id}/settings
 all ratelimit PUT /api/{org_id}/fleet/fleets/{fleet_id}/settings
 all mcp GET /api/{org_id}/fleet/pipelines
 all ratelimit GET /api/{org_id}/fleet/pipelines
@@ -177,7 +174,6 @@ all mcp POST /api/{org_id}/fleet/rollouts/{id}/skip
 all ratelimit POST /api/{org_id}/fleet/rollouts/{id}/skip
 all mcp GET /api/{org_id}/fleet/settings
 all ratelimit GET /api/{org_id}/fleet/settings
-all mcp PUT /api/{org_id}/fleet/settings
 all ratelimit PUT /api/{org_id}/fleet/settings
 all mcp GET /api/{org_id}/fleet/summary
 all ratelimit GET /api/{org_id}/fleet/summary
@@ -206,14 +202,11 @@ all summary GET /api/{org_id}/gen_ai/agents
 all tag GET /api/{org_id}/gen_ai/agents
 all mcp GET /api/{org_id}/groups
 all ratelimit GET /api/{org_id}/groups
-all mcp POST /api/{org_id}/groups
 all ratelimit POST /api/{org_id}/groups
 all ratelimit DELETE /api/{org_id}/groups/bulk
-all mcp DELETE /api/{org_id}/groups/{group_name}
 all ratelimit DELETE /api/{org_id}/groups/{group_name}
 all mcp GET /api/{org_id}/groups/{group_name}
 all ratelimit GET /api/{org_id}/groups/{group_name}
-all mcp PUT /api/{org_id}/groups/{group_name}
 all ratelimit PUT /api/{org_id}/groups/{group_name}
 all ratelimit POST /api/{org_id}/ingest/metrics/_json
 all ratelimit GET /api/{org_id}/ingest/recent_rejections
@@ -243,7 +236,6 @@ all binary POST /api/{org_id}/prometheus/api/v1/write
 all ratelimit POST /api/{org_id}/prometheus/api/v1/write
 all mcp GET /api/{org_id}/query_functions
 all ratelimit GET /api/{org_id}/query_functions
-all mcp PUT /api/{org_id}/rename
 all ratelimit PUT /api/{org_id}/rename
 all mcp PUT /api/{org_id}/reports/{name}/enable
 all ratelimit PUT /api/{org_id}/reports/{name}/enable
@@ -281,11 +273,9 @@ all mcp GET /api/{org_id}/settings/gen_ai/agent_mapping
 all ratelimit GET /api/{org_id}/settings/gen_ai/agent_mapping
 all summary GET /api/{org_id}/settings/gen_ai/agent_mapping
 all tag GET /api/{org_id}/settings/gen_ai/agent_mapping
-all mcp PUT /api/{org_id}/settings/gen_ai/agent_mapping
 all ratelimit PUT /api/{org_id}/settings/gen_ai/agent_mapping
 all summary PUT /api/{org_id}/settings/gen_ai/agent_mapping
 all tag PUT /api/{org_id}/settings/gen_ai/agent_mapping
-all mcp DELETE /api/{org_id}/settings/gen_ai/agent_registry
 all ratelimit DELETE /api/{org_id}/settings/gen_ai/agent_registry
 all summary DELETE /api/{org_id}/settings/gen_ai/agent_registry
 all tag DELETE /api/{org_id}/settings/gen_ai/agent_registry
@@ -400,7 +390,6 @@ all mcp POST /api/{org_id}/{stream_name}/profiles/diff
 all ratelimit POST /api/{org_id}/{stream_name}/profiles/diff
 all mcp GET /api/{org_id}/{stream_name}/profiles/merge
 all ratelimit GET /api/{org_id}/{stream_name}/profiles/merge
-all mcp POST /api/{org_id}/{stream_name}/profiles/merge
 all ratelimit POST /api/{org_id}/{stream_name}/profiles/merge
 all mcp GET /api/{org_id}/{stream_name}/profiles/meta
 all ratelimit GET /api/{org_id}/{stream_name}/profiles/meta
@@ -486,7 +475,6 @@ oss route GET /api/{org_id}/fleet/tokens
 oss route POST /api/{org_id}/fleet/tokens
 oss route POST /api/{org_id}/fleet/tokens/{id}/revoke
 oss route GET /api/{org_id}/gen_ai/agents
-oss mcp POST /api/{org_id}/organizations/assume_service_account
 oss summary POST /api/{org_id}/organizations/assume_service_account
 oss mcp GET /api/{org_id}/pipelines/backfill
 oss response GET /api/{org_id}/pipelines/backfill
@@ -502,9 +490,6 @@ oss route GET /api/{org_id}/ratelimit/module_list
 oss route GET /api/{org_id}/ratelimit/role_list
 oss route PUT /api/{org_id}/ratelimit/update
 oss mcp GET /api/{org_id}/roles
-oss mcp POST /api/{org_id}/roles
-oss mcp DELETE /api/{org_id}/roles/{role_id}
-oss mcp PUT /api/{org_id}/roles/{role_id}
 oss ratelimit PUT /api/{org_id}/roles/{role_id}
 oss route GET /api/{org_id}/search_jobs
 oss route POST /api/{org_id}/search_jobs
