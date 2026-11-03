@@ -734,6 +734,29 @@ async fn build_response(
     }
 }
 
+/// Headers to skip when forwarding requests.
+const SKIP_REQUEST_HEADERS: &[&str] = &[
+    "connection",
+    "keep-alive",
+    "transfer-encoding",
+    "host",
+    "content-length",
+];
+
+/// Headers to skip when forwarding responses (streaming).
+const SKIP_RESPONSE_HEADERS_STREAMING: &[&str] = &[
+    "content-encoding",
+    "transfer-encoding",
+    "cache-control",
+    "connection",
+    "content-length",
+];
+
+/// Headers to skip when forwarding responses (non-streaming).
+/// Note: reqwest auto-decompresses responses, so content-length refers to compressed size.
+const SKIP_RESPONSE_HEADERS_NORMAL: &[&str] =
+    &["content-encoding", "transfer-encoding", "content-length"];
+
 /// Relays chunks; the first upstream error becomes one SSE error event and ends the stream.
 fn relay_chunks<S, E>(
     upstream: S,
@@ -763,29 +786,6 @@ where
         std::future::ready(Some(Ok::<_, std::io::Error>(bytes)))
     })
 }
-
-/// Headers to skip when forwarding requests.
-const SKIP_REQUEST_HEADERS: &[&str] = &[
-    "connection",
-    "keep-alive",
-    "transfer-encoding",
-    "host",
-    "content-length",
-];
-
-/// Headers to skip when forwarding responses (streaming).
-const SKIP_RESPONSE_HEADERS_STREAMING: &[&str] = &[
-    "content-encoding",
-    "transfer-encoding",
-    "cache-control",
-    "connection",
-    "content-length",
-];
-
-/// Headers to skip when forwarding responses (non-streaming).
-/// Note: reqwest auto-decompresses responses, so content-length refers to compressed size.
-const SKIP_RESPONSE_HEADERS_NORMAL: &[&str] =
-    &["content-encoding", "transfer-encoding", "content-length"];
 
 /// Builds request headers for the upstream request.
 fn build_request_headers(headers: &HeaderMap, is_streaming: bool) -> reqwest::header::HeaderMap {
@@ -1329,40 +1329,31 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_stream_open_at_the_proxy_timeout_ends_after_one_error_event() {
-        // Like GET /mcp between keepalives: one chunk, then silence until the client gives up.
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let upstream = axum::Router::new().fallback(|| async {
-            let idle = futures::stream::once(async {
-                Ok::<_, std::io::Error>(Bytes::from_static(b": connected\n\n"))
-            })
-            .chain(futures::stream::pending());
-            Response::builder()
-                .header(header::CONTENT_TYPE, "text/event-stream")
-                .body(Body::from_stream(idle))
-                .unwrap()
-        });
-        tokio::spawn(async move { axum::serve(listener, upstream).await.unwrap() });
-
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(1))
-            .build()
-            .unwrap();
-        let full_url = format!("http://127.0.0.1:{port}/api/default/mcp");
-        let resp = client.get(&full_url).send().await.unwrap();
+    async fn a_response_body_that_fails_forever_reaches_the_client_as_one_error_event() {
+        // How a body past the client's total timeout looks: a chunk, then an error on every poll.
+        let body = futures::stream::iter([Ok(Bytes::from_static(b": connected\n\n"))]).chain(
+            futures::stream::repeat_with(|| Err(std::io::Error::other("deadline has elapsed"))),
+        );
+        let resp: reqwest::Response = Response::builder()
+            .header(header::CONTENT_TYPE, "text/event-stream")
+            .body(reqwest::Body::wrap_stream(body))
+            .unwrap()
+            .into();
         let target = ProxyTarget {
             path: "/api/default/mcp".to_string(),
-            full_url,
-            node_addr: format!("127.0.0.1:{port}"),
+            full_url: "http://127.0.0.1:5080/api/default/mcp".to_string(),
+            node_addr: "127.0.0.1:5080".to_string(),
         };
 
         let response = build_response(resp, &target, true, std::time::Instant::now()).await;
-        let frames = response.into_body().into_data_stream().take(10).collect();
-        let frames: Vec<_> = tokio::time::timeout(std::time::Duration::from_secs(30), frames)
-            .await
-            .expect("the relayed stream never ended");
 
+        // `take` turns a regression into a failed assertion instead of a hang.
+        let frames: Vec<_> = response
+            .into_body()
+            .into_data_stream()
+            .take(10)
+            .collect()
+            .await;
         assert_eq!(frames.len(), 2, "{frames:?}");
         assert_eq!(frames[0].as_ref().unwrap(), ": connected\n\n");
         let event = frames[1].as_ref().unwrap();
