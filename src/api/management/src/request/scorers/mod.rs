@@ -661,9 +661,8 @@ async fn run_scorer_test(
                     org_id, &scorer,
                 )
                 .await
-                .map_err(|e| {
-                    ScorerError::InfraError(infra::errors::Error::Message(e.to_string()))
-                })?;
+                // preparing a remote scorer only parses and validates the submitted config
+                .map_err(|e| ScorerError::InvalidProviderConfig(e.to_string()))?;
 
             match remote_cfg.run(&attrs).await {
                 Ok(output) => {
