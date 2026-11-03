@@ -59,6 +59,7 @@ const ROUTER_PREFIXES: &[(&str, &str)] = &[
     ("public_dashboard_admin_routes", "/api"),
     ("ai_chat_routes", "/api"),
     ("alert_calibration_routes", "/api"),
+    ("autoobserve_routes", "/api"),
     ("downtime_routes", "/api"),
     ("report_routes", "/api"),
     ("oncall_routes", "/api"),
